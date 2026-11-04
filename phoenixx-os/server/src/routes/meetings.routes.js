@@ -118,13 +118,13 @@ router.post('/', requires('meetings', 'create'), async (req, res) => {
     await notifyMany({
       tenantId,
       userIds: attendeeIds,
-      eventKey: 'action_item.assigned',
+      eventKey: 'meeting.invited',
       vars: {
-        title: `Meeting: ${body.title}`,
-        priority: 'medium',
-        due_date: day,
-        due_time: formatDueTime(timeInTz(tz, at)),
-        due: `${day} · ${formatDueTime(timeInTz(tz, at))}`,
+        title: body.title,
+        host: req.auth.name,
+        when: `${day} · ${formatDueTime(timeInTz(tz, at))}`,
+        duration: body.duration_minutes || 30,
+        recurring: '',
       },
       link: `/meetings/${id}`,
     }).catch(() => {});

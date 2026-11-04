@@ -13,12 +13,16 @@ import { requires, can } from '../middleware/rbac.js';
 import { scopeFilter } from '../middleware/auth.js';
 import { upsertDeadline, resolveDeadline, resolveEscalations, raiseEscalation } from '../services/deadlines.js';
 import { notifyMany } from '../services/notifications.js';
+import { idempotency } from '../middleware/common.js';
+import { ASSISTANT_SOURCE, canUseAssistant, eligibleAssignees } from '../services/taskAssistant.js';
 import { emitWebhook } from '../services/webhooks.js';
 
 const router = Router();
 
 const STATUSES = ['open', 'in_progress', 'blocked', 'done', 'cancelled'];
 const PRIORITIES = ['low', 'medium', 'high', 'urgent'];
+/** How a priority reads in a notification: "medium" is what people call Normal. */
+const PRIORITY_LABEL = { low: 'Low', medium: 'Normal', high: 'High', urgent: 'Urgent' };
 
 const itemSchema = z.object({
   title: z.string().min(2).max(240),
@@ -49,7 +53,8 @@ const itemSchema = z.object({
   watchers: z.array(z.string()).optional(),
   // 'advance_planner' is written only by the plan conversion: a forged link
   // would claim a planner task and stop the real conversion of it.
-  source_type: z.string().refine((s) => s !== 'advance_planner', 'That source is set by the Advance Planner only')
+  // 'meeting_ai' likewise only by an approved meeting task (meetingIntel.js).
+  source_type: z.string().refine((s) => !['advance_planner', 'meeting_ai'].includes(s), 'That source is set by the system only')
     .optional().nullable(),
   source_id: z.string().optional().nullable(),
   sop_id: z.string().optional().nullable(),
@@ -228,13 +233,13 @@ const projectTeamIds = async (tenantId, projectId) => (await all(
 )).map((r) => r.user_id);
 
 /** Tells people they have been put on a task. Never the person doing it. */
-async function notifyAssigned(req, item, userIds) {
+async function notifyAssigned(req, item, userIds, { eventKey = 'action_item.assigned', vars = {} } = {}) {
   const targets = userIds.filter((id) => id && id !== req.auth.userId);
   if (!targets.length) return;
   await notifyMany({
     tenantId: req.auth.tenantId,
     userIds: targets,
-    eventKey: 'action_item.assigned',
+    eventKey,
     vars: {
       title: item.title,
       priority: item.priority,
@@ -243,6 +248,9 @@ async function notifyAssigned(req, item, userIds) {
       /** Date and time in one phrase, for templates that want the whole thing. */
       due: formatDue(item.due_date, item.due_time),
       assigned_by: req.auth.name,
+      priority_label: PRIORITY_LABEL[item.priority] || item.priority,
+      due_line: item.due_date ? `Due: ${formatDue(item.due_date, item.due_time)}.` : 'No due date set.',
+      ...vars,
     },
     link: `/action-items?open=${item.id}`,
   }).catch(() => {});
@@ -871,6 +879,16 @@ router.get('/:id', requires('action_items', 'view'), async (req, res) => {
          LEFT JOIN users u ON u.id = s.user_id WHERE s.id = ? AND s.tenant_id = ?`,
       [item.source_plan_id, req.auth.tenantId],
     ) || null : null,
+    /** The meeting this was approved from (AI Meeting Intelligence), who approved it, and where it was said. */
+    source_meeting: item.source_type === 'meeting_ai' ? await get(
+      `SELECT am.id AS ai_meeting_id, am.title, am.meeting_date, it.start_seconds, it.decided_at AS approved_at,
+              du.name AS approved_by_name,
+              (SELECT mt.id FROM meetings mt WHERE mt.ai_meeting_id = am.id AND mt.tenant_id = am.tenant_id) AS live_meeting_id
+         FROM ai_meeting_items it JOIN ai_meetings am ON am.id = it.meeting_id
+         LEFT JOIN users du ON du.id = it.decided_by
+        WHERE it.id = ? AND it.tenant_id = ?`,
+      [item.source_id, req.auth.tenantId],
+    ) || null : null,
     /** Whether this caller still owes an update on it today. */
     my_update_today: await get(
       `SELECT * FROM action_updates WHERE tenant_id = ? AND action_item_id = ? AND user_id = ?
@@ -881,11 +899,29 @@ router.get('/:id', requires('action_items', 'view'), async (req, res) => {
 });
 
 // --------------------------------------------------------------- create
-router.post('/', requires('action_items', 'create'), async (req, res) => {
-  const body = validate(itemSchema, req.body);
+/**
+ * Creates one action item: validation, assignment, deadline registration,
+ * audit and the assignee's notification. The POST route below and the AI
+ * Meeting Intelligence approval both come through here, so a task approved
+ * from a meeting is created by exactly the same rules as one typed in.
+ * `body` must already be validated against itemSchema.
+ */
+export async function createActionItem(req, body, { notify } = {}) {
   const { tenantId, userId } = req.auth;
   const ts = nowIso();
   const id = uuid();
+
+  // A task from the AI assistant: the confirm screen is not trusted. The role
+  // and the assignee are checked again here, against the same scope the
+  // assistant offered (an owner: anyone active; a manager: their reports).
+  if (body.source_type === ASSISTANT_SOURCE) {
+    if (!canUseAssistant(req.auth)) throw forbidden('The task assistant is available to owners and managers');
+    if (body.assign_from_project_id || body.assignee_ids?.length) {
+      throw badRequest('The task assistant assigns one person at a time');
+    }
+    const allowed = (await eligibleAssignees(req.auth)).some((p) => p.id === body.owner_id);
+    if (!allowed) throw forbidden('You can only assign this task to someone in your team');
+  }
 
   // An action item is work handed to somebody else. Nobody assigns one to
   // themselves - their own to-dos live on the personal list on My Day - so
@@ -927,9 +963,18 @@ router.post('/', requires('action_items', 'create'), async (req, res) => {
 
   await syncDeadline(tenantId, item);
   await audit(req, { entity: 'action_item', entityId: id, action: 'create', after: item });
-  await notifyAssigned(req, item, await assigneeIds(tenantId, id, item.owner_id));
+  await notifyAssigned(req, item, await assigneeIds(tenantId, id, item.owner_id), notify);
 
-  return created(res, await withValidation(req, await get(`${SELECT} WHERE a.id = ?`, [id])));
+  return await get(`${SELECT} WHERE a.id = ?`, [id]);
+}
+
+/** Validates a task body the way the create route does. */
+export const validateTaskBody = (input) => validate(itemSchema, input);
+
+router.post('/', requires('action_items', 'create'), idempotency, async (req, res) => {
+  const body = validate(itemSchema, req.body);
+  const row = await createActionItem(req, body);
+  return created(res, await withValidation(req, row));
 });
 
 // --------------------------------------------------------------- update

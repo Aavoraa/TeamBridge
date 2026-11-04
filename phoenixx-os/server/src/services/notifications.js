@@ -144,9 +144,35 @@ function providerFor(channel) {
 // ------------------------------------------------------------------ templates
 /** Built-in copy; tenants may override any of these (B5). */
 export const DEFAULT_TEMPLATES = {
+  // AI Meetings (services/liveMeetings.js)
+  'meeting.invited': {
+    subject: 'Meeting invitation: {{title}}',
+    body: 'Hi {{user.name}}, {{host}} has invited you to "{{title}}" on {{when}} ({{duration}} min){{recurring}}. Open the meeting to accept or decline, and to join when it starts.',
+  },
+  'meeting.rescheduled': {
+    subject: 'Meeting moved: {{title}}',
+    body: 'Hi {{user.name}}, "{{title}}" has moved to {{when}} ({{duration}} min). It was {{previous}}.',
+  },
+  'meeting.cancelled': {
+    subject: 'Meeting cancelled: {{title}}',
+    body: 'Hi {{user.name}}, "{{title}}" on {{when}} has been cancelled by {{by}}.{{reason}}',
+  },
+  'meeting.reminder': {
+    subject: 'Starting soon: {{title}}',
+    body: 'Hi {{user.name}}, "{{title}}" starts at {{time}}. Join from the meeting page.',
+  },
+  'meeting.response': {
+    subject: '{{person}} {{response}} {{title}}',
+    body: 'Hi {{user.name}}, {{person}} has {{response}} your meeting "{{title}}" on {{when}}.',
+  },
+  // A task approved from AI Meeting Intelligence (services/meetingIntel.js).
+  'action_item.assigned_from_meeting': {
+    subject: 'New task assigned from meeting: {{title}}',
+    body: 'Hi {{user.name}}, a new task has been assigned to you based on the {{meeting_title}} meeting. Task: {{title}}. Deadline: {{deadline_label}}. Assigned by: {{assigned_by}}. Source: {{meeting_title}}. Please check your task dashboard for details.',
+  },
   'action_item.assigned': {
-    subject: 'New action item: {{title}}',
-    body: 'Hi {{user.name}}, you have been assigned "{{title}}" ({{priority}}) due {{due}}.',
+    subject: 'New task assigned: {{title}}',
+    body: 'Hi {{user.name}}, {{assigned_by}} has assigned you a new task: "{{title}}". Priority: {{priority_label}}. {{due_line}} Please check your task dashboard for details.',
   },
   'action_item.update_due': {
     subject: 'Daily update pending on {{count}} task(s)',

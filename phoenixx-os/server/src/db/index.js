@@ -197,6 +197,11 @@ const ADDED_INDEXES = [
   ['action_items', 'source_plan_id', `CREATE UNIQUE INDEX IF NOT EXISTS ux_ai_planner_task
      ON action_items(tenant_id, source_id) WHERE source_type = 'advance_planner'`],
   ['action_items', 'source_plan_id', 'CREATE INDEX IF NOT EXISTS ix_ai_source_plan ON action_items(tenant_id, source_plan_id)'],
+  ['meetings', 'kind', 'CREATE INDEX IF NOT EXISTS ix_meet_kind_time ON meetings(tenant_id, kind, scheduled_at)'],
+  ['meetings', 'invite_token', 'CREATE UNIQUE INDEX IF NOT EXISTS ux_meet_invite_token ON meetings(invite_token) WHERE invite_token IS NOT NULL'],
+  ['meetings', 'room_name', 'CREATE UNIQUE INDEX IF NOT EXISTS ux_meet_room ON meetings(room_name) WHERE room_name IS NOT NULL'],
+  ['meetings', 'series_id', 'CREATE INDEX IF NOT EXISTS ix_meet_series ON meetings(series_id)'],
+  ['meeting_attendees', 'response', 'CREATE INDEX IF NOT EXISTS ix_matt_user ON meeting_attendees(tenant_id, user_id, meeting_id)'],
 ];
 
 
@@ -337,6 +342,48 @@ const ADDED_COLUMNS = [
   // gave this away as the hidden rowid; PostgreSQL has nothing equivalent.
   ['action_validations', 'seq', 'BIGSERIAL'],
   ['attendance_events', 'seq', 'BIGSERIAL'],
+  // Department, for department-wide meeting invitations and reporting. Free
+  // text HR maintains on the employee record; NULL = not set.
+  ['users', 'department', 'TEXT'],
+  // AI Meetings: the same meetings table as Meetings & MOM, extended for live
+  // video meetings (kind = 'live'). Existing rows keep kind 'standard'.
+  ['meetings', 'kind', "TEXT NOT NULL DEFAULT 'standard'"],
+  ['meetings', 'description', 'TEXT'],
+  ['meetings', 'department', 'TEXT'],
+  ['meetings', 'host_id', 'TEXT'],
+  ['meetings', 'room_name', 'TEXT'],          // LiveKit room; unique per meeting
+  ['meetings', 'invite_token', 'TEXT'],       // the shareable link's secret part
+  ['meetings', 'access', "TEXT NOT NULL DEFAULT 'invited'"], // invited | workspace (anyone in the workspace with the link)
+  ['meetings', 'recording_allowed', 'INTEGER NOT NULL DEFAULT 0'],
+  ['meetings', 'transcription_allowed', 'INTEGER NOT NULL DEFAULT 0'],
+  ['meetings', 'started_at', 'TEXT'],
+  ['meetings', 'ended_at', 'TEXT'],
+  ['meetings', 'recurrence', 'TEXT'],         // daily | weekly | monthly; NULL = one-off
+  ['meetings', 'recurrence_until', 'TEXT'],
+  ['meetings', 'series_id', 'TEXT'],          // shared by every occurrence of a recurring meeting
+  ['meetings', 'cancelled_at', 'TEXT'],
+  ['meetings', 'cancel_reason', 'TEXT'],
+  ['meetings', 'reminder_sent_at', 'TEXT'],
+  ['meetings', 'ai_meeting_id', 'TEXT'],      // the AI Meeting Intelligence analysis of this meeting
+  ['meetings', 'updated_by', 'TEXT'],
+  ['meeting_attendees', 'response', "TEXT NOT NULL DEFAULT 'pending'"], // pending | accepted | declined
+  ['meeting_attendees', 'responded_at', 'TEXT'],
+  ['meeting_attendees', 'role', "TEXT NOT NULL DEFAULT 'participant'"], // host | participant
+  ['meeting_attendees', 'invited_via', 'TEXT'],  // individual | department:<name> | link
+  ['meeting_attendees', 'deleted_at', 'TEXT'],
+  // Host controls: a locked meeting admits no new people (those in it stay);
+  // a blocked attendee was removed by the host and cannot rejoin this meeting.
+  ['meetings', 'locked', 'INTEGER NOT NULL DEFAULT 0'],
+  ['meeting_attendees', 'blocked', 'INTEGER NOT NULL DEFAULT 0'],
+  // Recording and transcription (Phase 5): what the host switched on, and when.
+  ['meetings', 'capture_active', 'INTEGER NOT NULL DEFAULT 0'],
+  ['meetings', 'capture_video', 'INTEGER NOT NULL DEFAULT 0'],
+  ['meetings', 'capture_audio', 'INTEGER NOT NULL DEFAULT 0'],
+  ['meetings', 'capture_started_at', 'TEXT'],
+  ['meetings', 'captions_on', 'INTEGER NOT NULL DEFAULT 0'],
+  // A part transcribed from one person's microphone already knows who spoke.
+  ['ai_meeting_parts', 'speaker_label', 'TEXT'],
+  ['ai_meeting_parts', 'speaker_user_id', 'TEXT'],
 ];
 
 

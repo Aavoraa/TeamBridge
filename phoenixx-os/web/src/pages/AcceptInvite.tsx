@@ -67,7 +67,7 @@ export default function AcceptInvite() {
       <div className="w-full max-w-sm">
         <div className="flex items-center gap-2.5 mb-8">
           <Logo size={36} />
-          <span className="font-semibold text-ink">Phoenixx OS</span>
+          <span className="font-semibold text-ink tracking-[-0.02em]">TeamBridge</span>
         </div>
 
         <h1 className="text-[23px] font-semibold text-ink tracking-[-0.01em]">Set up your account</h1>

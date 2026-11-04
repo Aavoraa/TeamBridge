@@ -54,6 +54,11 @@ DATABASE_URL="postgres://..." npm run seed
 | `CRON_SECRET` | 32+ random characters; protects the background-jobs endpoint |
 | `WEB_BASE_URL` | Optional until a custom domain is attached; defaults to the project's production `*.vercel.app` address. Invite and proposal links are built from it |
 | `API_BASE_URL` | Same value as `WEB_BASE_URL` |
+| `ANTHROPIC_API_KEY` | Optional. AI reading of commands in the AI Task Assistant (falls back to the built-in parser), and required for AI Meeting Intelligence analysis |
+| `OPENAI_API_KEY` | Optional. Speech-to-text for meeting recordings in AI Meeting Intelligence; without it only transcript files can be uploaded |
+| `GEMINI_API_KEY`, `TRANSCRIBE_PROVIDER=gemini` | Optional. Google Gemini for speech-to-text instead of OpenAI. Use a billing-enabled key: free-tier data may be used by Google |
+| `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | Optional. Live video for AI Meetings (LiveKit Cloud project → Settings → Keys). Without them meetings can be scheduled but not joined |
+| `RECORDING_S3_BUCKET`, `RECORDING_S3_REGION`, `RECORDING_S3_ACCESS_KEY_ID`, `RECORDING_S3_SECRET_ACCESS_KEY` | Optional. Where AI Meeting recordings go (see below). Without them meetings run without recording |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | Optional, for browser pop-ups (`npx web-push generate-vapid-keys`) |
 | `WHATSAPP_*`, `SMTP_*`, `EMAIL_PROVIDER` … | Optional, as in [`.env.example`](../.env.example) |
 
@@ -79,6 +84,37 @@ scheduler at it every 5 minutes, e.g. **cron-job.org**:
 - Schedule: every 5 minutes
 
 On the Pro plan, replace both with a Vercel Cron entry of `*/5 * * * *`.
+
+### LiveKit webhook
+
+In LiveKit Cloud → Settings → Webhooks, add `https://<your-app>.vercel.app/api/v1/livekit/webhook`
+and choose the same API key as `LIVEKIT_API_KEY`. The server verifies the
+signature; unsigned calls get 401. The webhook marks meetings live and ended
+and records who attended and for how long.
+
+### Recording storage (AWS S3)
+
+1. Create a bucket in the region closest to your LiveKit Cloud project. Leave
+   **Block all public access** on.
+2. Create an IAM user for it with only this policy (replace the bucket name):
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [{
+       "Effect": "Allow",
+       "Action": ["s3:PutObject", "s3:GetObject", "s3:DeleteObject", "s3:AbortMultipartUpload"],
+       "Resource": "arn:aws:s3:::YOUR-BUCKET/meetings/*"
+     }]
+   }
+   ```
+3. Create an access key for that user and set the four `RECORDING_S3_*` variables.
+4. To play recordings in the browser, add a CORS rule on the bucket allowing
+   `GET` from your app's address.
+
+The keys are sent to LiveKit with each recording request, because LiveKit's
+recorder uploads the files itself. Recording also needs `GEMINI_API_KEY` or `OPENAI_API_KEY` for
+transcripts and `ANTHROPIC_API_KEY` for the summary and proposed tasks.
 
 ## 4. Check it
 

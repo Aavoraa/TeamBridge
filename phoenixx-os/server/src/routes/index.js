@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { Router } from 'express';
+import express, { Router } from 'express';
 import { get, all } from '../db/index.js';
 import { nowIso } from '../lib/util.js';
 import { ok } from '../lib/http.js';
@@ -30,6 +30,10 @@ import { usersRouter } from './users.routes.js';
 import { billingRouter } from './billing.routes.js';
 import { adminRouter } from './admin.routes.js';
 import { syncRouter, fileRouter } from './sync.routes.js';
+import { assistantRouter } from './assistant.routes.js';
+import { meetingIntelRouter } from './meetingIntel.routes.js';
+import { liveMeetingsRouter } from './liveMeetings.routes.js';
+import { livekitConfigured, webhooks, applyWebhook } from '../services/livekit.js';
 import { openapi } from '../openapi.js';
 import { runDueJobs } from '../services/jobs.js';
 
@@ -80,6 +84,22 @@ api.all('/cron/tick', async (req, res) => {
   return ok(res, { ran, ms: Date.now() - started });
 });
 
+/**
+ * LiveKit webhooks (room started/finished, people joining/leaving). Public,
+ * but every request must carry LiveKit's signature over the exact body, which
+ * is why the body is read raw here. Anything unsigned is refused.
+ */
+api.post('/livekit/webhook', express.raw({ type: '*/*', limit: '1mb' }), async (req, res) => {
+  if (!livekitConfigured()) return res.status(503).json({ error: { code: 'video_not_configured', message: 'LiveKit is not configured' } });
+  let event;
+  try {
+    event = await webhooks().receive(Buffer.isBuffer(req.body) ? req.body.toString('utf8') : '', req.get('authorization'));
+  } catch {
+    return res.status(401).json({ error: { code: 'bad_signature', message: 'Webhook signature did not verify' } });
+  }
+  return ok(res, await applyWebhook(event));
+});
+
 api.use('/auth', authRouter);
 
 // E5 - proposal share links are deliberately unauthenticated.
@@ -96,6 +116,12 @@ api.use('/todo-plan', todoPlanRouter);
 api.use('/meetings', meetingsRouter);
 api.use('/notifications', notificationsRouter);
 api.use('/chat', chatRouter);
+// AI Task Assistant: owners and managers create tasks by voice or a typed sentence.
+api.use('/assistant', assistantRouter);
+// AI Meeting Intelligence: recordings/transcripts -> proposed tasks -> approval.
+api.use('/meeting-intel', meetingIntelRouter);
+// AI Meetings: live internal video meetings (scheduling, invitations, rooms).
+api.use('/ai-meetings', liveMeetingsRouter);
 api.use('/hr', hrRouter);
 api.use('/sop', sopRouter);
 api.use('/kpis', kpiRouter);

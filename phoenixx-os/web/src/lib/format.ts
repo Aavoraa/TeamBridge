@@ -206,6 +206,19 @@ export const titleCase = (s?: string | null) =>
 const AVATAR_COLORS = [
   '#1e40af', '#7c3aed', '#be185d', '#0f766e', '#b45309', '#4338ca', '#0369a1', '#9333ea',
 ];
+/**
+ * A person's avatar in soft colours: a light tint of their colour behind the
+ * initials, and the initials in a deep tone of the same colour. Blended with
+ * the theme's own surface and text, so it reads in light and dark mode alike.
+ */
+export function avatarStyle(seed?: string | null) {
+  const hue = avatarColor(seed);
+  return {
+    background: `color-mix(in srgb, ${hue} 14%, var(--surface-raised))`,
+    color: `color-mix(in srgb, ${hue} 78%, var(--ink))`,
+  };
+}
+
 export function avatarColor(seed?: string | null) {
   const s = seed || '';
   let hash = 0;

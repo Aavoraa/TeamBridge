@@ -139,9 +139,9 @@ function WorkspaceTab() {
           <CardHeader title="Branding" subtitle="Applied to the app, PDFs and client reports" icon={<Palette size={16} />} />
           <div className="p-4 space-y-4">
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Primary colour">
+              <Field label="Primary colour" hint="Used on the invoices, proposals and reports you send.">
                 <div className="flex gap-2">
-                  <input type="color" value={form.brand_primary || '#E15926'} disabled={!editable}
+                  <input type="color" value={form.brand_primary || '#17703F'} disabled={!editable}
                     onChange={(e) => set('brand_primary', e.target.value.toUpperCase())}
                     aria-label="Primary colour"
                     className="h-9 w-12 rounded-md border border-line-strong cursor-pointer bg-raised p-1" />
@@ -218,7 +218,7 @@ function WorkspaceTab() {
                   className="mt-0.5 h-4 w-4 rounded border-line-strong cursor-pointer accent-[var(--brand)]" />
                 <span>
                   <span className="block text-ink font-medium">Allow platform support access</span>
-                  Lets Phoenixx OS support sign in as an owner to help you. Every such session is
+                  Lets TeamBridge support sign in as an owner to help you. Every such session is
                   written to your audit log. Off by default.
                 </span>
               </label>

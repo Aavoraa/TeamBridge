@@ -1742,7 +1742,22 @@ function ItemDrawer({ id, meta, onClose }: { id: string; meta: any; onClose: () 
             )}
             {item.recurrence && item.recurrence !== 'none' && <Detail label="Repeats" value={item.recurrence} />}
             {item.estimate_minutes && <Detail label="Estimate" value={`${Math.round(item.estimate_minutes / 60)}h`} />}
-            {item.source_type && !['manual', 'advance_planner'].includes(item.source_type) && (
+            {item.source_type === 'meeting_ai' && item.source_meeting && (
+              <div>
+                <dt className="label-cap">From a meeting</dt>
+                <dd className="text-ink mt-0.5">
+                  <Link to={`/meeting-intel/${item.source_meeting.ai_meeting_id}`} className="text-[var(--brand)] hover:underline">
+                    {item.source_meeting.title}{item.source_meeting.meeting_date ? ` · ${date(item.source_meeting.meeting_date)}` : ''}
+                  </Link>
+                  {item.source_meeting.approved_by_name && <span className="block text-[12px] text-subtle">Approved by {item.source_meeting.approved_by_name}</span>}
+                  {item.source_meeting.live_meeting_id && item.source_meeting.start_seconds != null && (
+                    <Link to={`/ai-meetings/m/${item.source_meeting.live_meeting_id}?t=${Math.floor(item.source_meeting.start_seconds)}`}
+                      className="block text-[12px] text-[var(--brand)] hover:underline">Hear where it was said</Link>
+                  )}
+                </dd>
+              </div>
+            )}
+            {item.source_type && !['manual', 'advance_planner', 'meeting_ai'].includes(item.source_type) && (
               <Detail label="Source" value={item.source_type.replace('_', ' ')} />
             )}
             {item.source_type === 'advance_planner' && (

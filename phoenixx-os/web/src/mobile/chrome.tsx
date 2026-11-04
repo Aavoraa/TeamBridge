@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { useTheme } from '../components/Layout';
-import { avatarColor, initials } from '../lib/format';
+import { useStockPhoto, avatarTint } from '../lib/avatar';
 import { Sheet } from './sheet';
 
 type Chrome = { openProfile: () => void; openMore: () => void };
@@ -111,11 +111,8 @@ export function ProfileButton() {
       {user?.avatar_url
         ? <img src={user.avatar_url} alt="" className="h-full w-full object-cover" />
         : (
-          <span
-            className="flex h-full w-full items-center justify-center text-[13px] font-semibold text-white"
-            style={{ background: avatarColor(name) }}
-          >
-            {initials(name)}
+          <span className="block h-full w-full" style={{ background: avatarTint(name) }}>
+            <Drawn name={name} />
           </span>
         )}
     </button>
@@ -155,13 +152,12 @@ function ProfileSheet({ open, onClose }: { open: boolean; onClose: () => void })
     <Sheet open={open} onClose={onClose} title="You">
       <div className="flex items-center gap-3">
         <span
-          className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full
-                     text-[18px] font-semibold text-white"
-          style={{ background: avatarColor(name) }}
+          className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full"
+          style={{ background: avatarTint(name) }}
         >
           {user?.avatar_url
             ? <img src={user.avatar_url} alt="" className="h-full w-full object-cover" />
-            : initials(name)}
+            : <Drawn name={name} />}
         </span>
         <div className="min-w-0">
           <p className="truncate text-[16px] font-semibold text-ink">{name}</p>
@@ -252,4 +248,12 @@ function MoreSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
       ))}
     </Sheet>
   );
+}
+
+/** A stock photo from the pool, or soft initials when there is none. */
+function Drawn({ name }: { name?: string | null }) {
+  const src = useStockPhoto(name);
+  return src
+    ? <img src={src} alt="" className="h-full w-full object-cover" draggable={false} loading="lazy" />
+    : <span className="grid h-full w-full place-items-center text-[13px] font-semibold text-[var(--ink-muted)]">{(name || '?').split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase()}</span>;
 }

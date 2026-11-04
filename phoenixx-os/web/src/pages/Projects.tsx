@@ -548,12 +548,14 @@ function ProjectDrawer({ id, onClose }: { id: string; onClose: () => void }) {
             { id: 'team', label: `Team (${p.team_size})` },
             { id: 'updates', label: 'Daily updates' },
             { id: 'details', label: 'Project details' },
+            ...(can('meetings', 'view') ? [{ id: 'meetings', label: 'Meetings' }] : []),
           ]} />
         </div>
 
         {tab === 'team' ? <TeamTab project={p} editable={editable} onAdd={() => setAddOpen(true)} />
           : tab === 'updates' ? <ProjectUpdateHistory projectId={p.id} />
-            : <DetailsTab project={p} editable={editable} />}
+            : tab === 'meetings' ? <ProjectMeetings projectId={p.id} canCreate={can('meetings', 'create')} />
+              : <DetailsTab project={p} editable={editable} />}
       </Drawer>
 
       {addOpen && <AddMemberModal project={p} onClose={() => setAddOpen(false)} />}
@@ -564,6 +566,44 @@ function ProjectDrawer({ id, onClose }: { id: string; onClose: () => void }) {
         title={`Delete ${p.name}?`}
         message={`It disappears from Projects for everyone and its ${p.team_size || 0} team seat(s) are released. Its chat room closes. Past daily updates, Advance Planner tasks and the audit log keep their history.`} />
     </>
+  );
+}
+
+/** AI Meetings linked to this project (the ones this user can see), and a way to schedule one. */
+function ProjectMeetings({ projectId, canCreate }: { projectId: string; canCreate: boolean }) {
+  const navigate = useNavigate();
+  const upcoming = useQuery({ queryKey: ['ai-meetings', 'project', projectId, 'upcoming'], queryFn: () => api.get<any>(`/ai-meetings?tab=upcoming&project_id=${projectId}`).then((r) => r.data) });
+  const past = useQuery({ queryKey: ['ai-meetings', 'project', projectId, 'history'], queryFn: () => api.get<any>(`/ai-meetings?tab=history&project_id=${projectId}`).then((r) => r.data) });
+  const when = (iso: string) => new Date(iso).toLocaleString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+  const list = (rows: any[] | undefined, empty: string) => (
+    !rows ? <div className="p-4"><TableSkeleton rows={2} cols={2} /></div>
+      : rows.length === 0 ? <p className="px-5 py-3 text-[13px] text-subtle">{empty}</p>
+        : (
+          <ul className="divide-y divide-line">
+            {rows.slice(0, 20).map((m: any) => (
+              <li key={m.id}>
+                <button type="button" onClick={() => navigate(`/ai-meetings/m/${m.id}`)} className="flex w-full items-center gap-3 px-5 py-2.5 text-left hover:bg-sunken cursor-pointer">
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13.5px] text-ink">{m.title}</span>
+                    <span className="block text-[12px] text-subtle">{when(m.scheduled_at)} · {m.host_name}{m.attended_count ? ` · ${m.attended_count} attended` : ''}</span>
+                  </span>
+                  {m.cancelled_at ? <Badge tone="neutral">Cancelled</Badge> : m.status === 'live' ? <Badge tone="negative">Live</Badge> : null}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )
+  );
+  return (
+    <div className="pb-4">
+      <div className="flex items-center justify-between px-5 pt-4 pb-1">
+        <p className="label-cap">Coming up</p>
+        {canCreate && <Button size="sm" onClick={() => navigate(`/ai-meetings/schedule?project_id=${projectId}`)}>Schedule a meeting for this project</Button>}
+      </div>
+      {list(upcoming.data, 'Nothing scheduled for this project.')}
+      <p className="label-cap px-5 pt-4 pb-1">Past meetings</p>
+      {list(past.data, 'No past meetings linked to this project.')}
+    </div>
   );
 }
 

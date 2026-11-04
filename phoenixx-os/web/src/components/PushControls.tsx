@@ -80,7 +80,7 @@ export function PushBanner() {
       <BellRing size={18} className="text-[var(--brand)] shrink-0" />
       <p className="min-w-0 flex-1 text-[13.5px] text-muted">
         <span className="text-ink font-medium">Get a Chrome pop-up for every notification</span>
-        {' '}— Advance Planner reminders, approvals, comments and more, even when Phoenixx OS is closed.
+        {' '}— Advance Planner reminders, approvals, comments and more, even when TeamBridge is closed.
       </p>
       <Button size="sm" variant="primary" loading={on.isPending} onClick={() => on.mutate()}>Turn on pop-ups</Button>
       <button onClick={dismiss} aria-label="Not now" className="text-subtle hover:text-ink cursor-pointer"><X size={16} /></button>

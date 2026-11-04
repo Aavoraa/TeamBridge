@@ -1,19 +1,25 @@
-import { useEffect, useRef, useState } from 'react';
-import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  LayoutDashboard, ListChecks, CalendarDays, Users2, FileText, Receipt, Wallet,
-  BookOpenCheck, BarChart3, Settings, Bell, Menu, X, LogOut, Sun, Moon, Search,
-  Building2, ShieldCheck, ChevronDown, CreditCard, Clock, AlertTriangle, Target, CheckCircle2,
-  FolderKanban, Megaphone, MessagesSquare, Contact, FileSpreadsheet, History, Send, Landmark, ClipboardList,
+  House, SquareCheckBig, Users2, FileText, Receipt, Wallet, BookOpenCheck, BarChart3, Settings, Bell, Menu, X, LogOut,
+  Sun, Moon, Search, ShieldCheck, ChevronDown, CreditCard, Clock, AlertTriangle, Target, CheckCircle2, FolderKanban,
+  Megaphone, MessagesSquare, Contact, FileSpreadsheet, History, Send, Landmark, ClipboardList, Sparkles, AudioLines,
+  Video, CalendarPlus, LogIn, CalendarClock, CalendarDays, ListChecks, Building2, UserRound, ArrowRight, MessageSquare,
+  SquareUser, Presentation,
 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { PushBanner, PushToggle, usePushMessages } from './PushControls';
 import { api } from '../lib/api';
 import { store } from '../lib/storage';
-import { Logo } from './Logo';
+import { Wordmark } from './Logo';
 import { applyStatusBarTheme } from '../lib/native';
 import { Avatar, Badge, Button, cx, EmptyState } from './ui';
+
+// Loaded on first open: most sessions never use it.
+const TaskAssistant = lazy(() => import('./TaskAssistant'));
+/** Roles that hand out work get the AI Task Assistant in the top bar. */
+const ASSISTANT_ROLES = ['owner', 'manager', 'super_admin'];
 import { relative } from '../lib/format';
 import TodoReminders from './TodoReminders';
 
@@ -39,91 +45,112 @@ export function useTheme() {
 }
 
 /* ------------------------------------------------------------ navigation */
+type BadgeKind = 'overdue' | 'approvals' | 'chat' | 'reimb_manager' | 'reimb_finance';
 type NavItem = {
-  to: string; label: string; icon: any;
+  to: string; label: string; icon?: any;
   /** Hidden unless the caller can view this module. */
   module?: string;
   /** Hidden unless the caller can take this action on `module`. */
   action?: string;
   /** Match the path exactly. Needed wherever one nav path prefixes another. */
   exact?: boolean;
-  badge?: 'overdue' | 'approvals' | 'chat' | 'reimb_manager' | 'reimb_finance';
+  badge?: BadgeKind;
+  superAdmin?: boolean;
 };
+/** A top-level entry: a page of its own, or a section that opens to show its pages. */
+type NavGroup = { label: string; icon: any } & ({ item: NavItem; children?: never } | { item?: never; children: NavItem[] });
 
-const NAV: { section: string; items: NavItem[] }[] = [
+/**
+ * The design's ten sections. Every page of the app sits under one of them, so
+ * the sidebar stays short while nothing becomes harder to reach. A section the
+ * user can see only one page of is drawn as a plain link to that page.
+ */
+const NAV: NavGroup[] = [
+  { label: 'Dashboard', icon: House, item: { to: '/', label: 'Dashboard', exact: true } },
+  { label: 'Projects', icon: FolderKanban, item: { to: '/projects', label: 'Projects', module: 'projects' } },
   {
-    section: 'Work',
-    items: [
-      { to: '/', label: 'My day', icon: LayoutDashboard, exact: true },
+    label: 'Tasks', icon: SquareCheckBig, children: [
       { to: '/action-items', label: 'Action items', icon: ListChecks, module: 'action_items', badge: 'overdue' },
-      { to: '/meetings', label: 'Meetings & MOM', icon: CalendarDays, module: 'meetings' },
       { to: '/deadlines', label: 'Deadlines', icon: Clock, module: 'deadlines' },
-      { to: '/chat', label: 'Chat', icon: MessagesSquare, module: 'chat', badge: 'chat' },
     ],
   },
   {
-    section: 'Clients',
-    items: [
+    label: 'CRM', icon: SquareUser, children: [
       // The register first, the pipeline second: you look up who a client is far
       // more often than you move a deal between stages.
       { to: '/clients', label: 'Clients', icon: Contact, module: 'crm' },
-      { to: '/crm', label: 'CRM pipeline', icon: Users2, module: 'crm' },
+      { to: '/crm', label: 'Pipeline', icon: Users2, module: 'crm' },
       { to: '/proposals', label: 'Proposals', icon: FileText, module: 'proposals' },
-      { to: '/projects', label: 'Projects & teams', icon: FolderKanban, module: 'projects' },
       { to: '/marketing', label: 'Marketing leads', icon: Megaphone, module: 'crm' },
     ],
   },
   {
-    section: 'Money',
-    items: [
+    label: 'Finance', icon: Wallet, children: [
       { to: '/invoices', label: 'Invoices', icon: Receipt, module: 'invoices' },
-      // Exact: /finance/reimbursements/* is a different section entirely.
+      // Exact: /finance/reimbursements/* is a different area entirely.
       { to: '/finance', label: 'Cost & profit', icon: Wallet, module: 'costs', exact: true },
-    ],
-  },
-  {
-    // Its own section, not a tab inside Cost & profit: everybody in the
-    // workspace files an expense claim, whereas almost nobody reads a P&L.
-    section: 'Finance',
-    items: [
-      { to: '/finance/reimbursements/new', label: 'Reimbursement', icon: Send, module: 'reimbursements', action: 'create' },
+      { to: '/finance/reimbursements/new', label: 'New reimbursement', icon: Send, module: 'reimbursements', action: 'create' },
       { to: '/finance/reimbursements', label: 'My reimbursements', icon: Receipt, module: 'reimbursements', exact: true },
       { to: '/finance/reimbursements/approvals', label: 'Pending approvals', icon: ShieldCheck, module: 'reimbursements', action: 'approve', badge: 'reimb_manager' },
       { to: '/finance/reimbursements/review', label: 'Finance review', icon: Landmark, module: 'reimbursement_finance', badge: 'reimb_finance' },
       { to: '/finance/reimbursements/history', label: 'Reimbursement history', icon: History, module: 'reimbursements' },
-      { to: '/finance/reimbursements/reports', label: 'Expense & reimbursement reports', icon: FileSpreadsheet, module: 'reimbursements', action: 'export' },
+      { to: '/finance/reimbursements/reports', label: 'Expense reports', icon: FileSpreadsheet, module: 'reimbursements', action: 'export' },
     ],
   },
   {
-    section: 'People',
-    items: [
-      { to: '/hr', label: 'HR', icon: Building2, module: 'hr_attendance', badge: 'approvals' },
+    label: 'HR', icon: Users2, children: [
+      { to: '/hr', label: 'HR & attendance', icon: Building2, module: 'hr_attendance', badge: 'approvals' },
       { to: '/team', label: 'Team', icon: Users2, module: 'employees' },
     ],
   },
   {
-    section: 'Standards',
-    items: [
-      { to: '/sop', label: 'SOP & KPI', icon: BookOpenCheck, module: 'sop' },
+    // Live internal meetings and what comes out of them, plus the client MOM log.
+    label: 'Meetings', icon: Presentation, children: [
+      { to: '/ai-meetings', label: 'Meetings dashboard', icon: Video, module: 'meetings', exact: true },
+      { to: '/ai-meetings/schedule', label: 'Schedule meeting', icon: CalendarPlus, module: 'meetings', action: 'create' },
+      { to: '/ai-meetings/join', label: 'Join meeting', icon: LogIn, module: 'meetings' },
+      { to: '/ai-meetings/upcoming', label: 'Upcoming', icon: CalendarClock, module: 'meetings' },
+      { to: '/ai-meetings/history', label: 'History', icon: History, module: 'meetings' },
+      { to: '/meetings', label: 'Meetings & MOM', icon: CalendarDays, module: 'meetings' },
+      { to: '/meeting-intel', label: 'AI Meeting Intelligence', icon: AudioLines, module: 'meeting_intelligence', exact: true },
+      { to: '/meeting-intel?tab=pending', label: 'Task approvals', icon: ListChecks, module: 'meeting_intelligence', action: 'approve' },
+    ],
+  },
+  { label: 'Chat', icon: MessageSquare, item: { to: '/chat', label: 'Chat', module: 'chat', badge: 'chat' } },
+  {
+    label: 'Reports', icon: BarChart3, children: [
+      { to: '/reports', label: 'Reports', icon: BarChart3, module: 'reports' },
+      { to: '/dashboard', label: 'Traction dashboard', icon: Target, module: 'dashboard' },
+      { to: '/sop', label: 'SOP & KPI library', icon: BookOpenCheck, module: 'sop' },
     ],
   },
   {
-    section: 'Insight',
-    items: [
-      { to: '/dashboard', label: 'Traction dashboard', icon: Target, module: 'dashboard' },
-      { to: '/reports', label: 'Reports', icon: BarChart3, module: 'reports' },
+    label: 'Settings', icon: Settings, children: [
+      { to: '/settings', label: 'Workspace settings', icon: Settings, module: 'settings' },
+      { to: '/billing', label: 'Billing & plan', icon: CreditCard, module: 'billing' },
+      { to: '/profile', label: 'My profile', icon: UserRound },
+      { to: '/admin', label: 'Platform console', icon: ShieldCheck, superAdmin: true },
     ],
   },
 ];
 
-const ADMIN_NAV: NavItem[] = [
-  { to: '/settings', label: 'Settings', icon: Settings, module: 'settings' },
-  { to: '/billing', label: 'Billing & plan', icon: CreditCard, module: 'billing' },
-];
+/** Is this page the one open? A link with a query (?tab=pending) matches only with that query. */
+function matches(item: NavItem, pathname: string, search: string) {
+  const [path, query] = item.to.split('?');
+  if (query) return pathname === path && new URLSearchParams(search).toString().includes(query);
+  if (item.exact) return pathname === path;
+  return pathname === path || pathname.startsWith(`${path}/`);
+}
+
+/** Within a section, the one item to mark: a query match beats a plain one, a longer path beats a shorter. */
+function activeOf(items: NavItem[], pathname: string, search: string) {
+  const hits = items.filter((i) => matches(i, pathname, search));
+  return hits.sort((a, b) => Number(b.to.includes('?')) - Number(a.to.includes('?')) || b.to.length - a.to.length)[0] || null;
+}
 
 /* =================================================================== SHELL */
 export default function Layout() {
-  const { user, tenant, subscription, can, signOut } = useAuth();
+  const { user, subscription, can, signOut } = useAuth();
   const { dark, toggle } = useTheme();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
@@ -153,7 +180,7 @@ export default function Layout() {
   const approvals = home?.pending_approvals || {};
   const approvalCount = (approvals.leave || 0) + (approvals.regularizations || 0);
 
-  const badgeFor = (kind?: string) => {
+  const badgeFor = (kind?: BadgeKind) => {
     if (kind === 'overdue') return counters.overdue || 0;
     if (kind === 'approvals') return approvalCount;
     if (kind === 'chat') return counters.chat || 0;
@@ -162,149 +189,200 @@ export default function Layout() {
     return 0;
   };
 
+  const isSuperAdmin = user?.role === 'super_admin';
   // The same permission the API enforces decides whether an entry is drawn.
   // Hiding it is a courtesy; the server refuses the call either way.
-  const visible = (item: NavItem) => !item.module || can(item.module, item.action || 'view');
+  const visible = (item: NavItem) => (item.superAdmin ? isSuperAdmin : !item.module || can(item.module, item.action || 'view'));
 
-  const isSuperAdmin = user?.role === 'super_admin';
+  // Which sections are open: the one holding the current page always is.
+  const [open, setOpen] = useState<Record<string, boolean>>(() => { try { return JSON.parse(store.get('tb.nav.open') || '{}'); } catch { return {}; } });
+  useEffect(() => { store.set('tb.nav.open', JSON.stringify(open)); }, [open]);
+
+  const plan = String(subscription?.plan_name || '');
+  const showUpgrade = can('billing', 'view') && (subscription?.status === 'trial' || !/pro|enterprise|business|scale|premium/i.test(plan));
 
   return (
     <div className="min-h-full flex bg-surface">
       {/* ---------------------------------------------------------- sidebar */}
       {sidebarOpen && (
-        <div className="fixed inset-0 z-30 bg-slate-950/50 lg:hidden" onClick={() => setSidebarOpen(false)} aria-hidden />
+        <div className="fixed inset-0 z-30 bg-slate-950/40 lg:hidden" onClick={() => setSidebarOpen(false)} aria-hidden />
       )}
 
       <aside className={cx(
-        'fixed inset-y-0 left-0 z-40 w-[248px] shrink-0 border-r border-line bg-raised',
-        'flex flex-col transition-transform duration-200 lg:translate-x-0 lg:static no-print',
+        'fixed inset-y-0 left-0 z-40 w-[264px] shrink-0 border-r border-line bg-raised',
+        'flex flex-col transition-transform duration-200 lg:translate-x-0 lg:sticky lg:top-0 lg:h-screen no-print',
         sidebarOpen ? 'translate-x-0' : '-translate-x-full',
       )}>
-        <div className="flex items-center gap-2.5 px-4 h-14 border-b border-line shrink-0">
-          {/* The workspace's own identity, not the product's — an agency that
-              uploaded a logo sees it here, otherwise their initial in their
-              brand colour. Only with no tenant at all does Phoenixx OS's own
-              mark stand in. */}
-          {tenant?.logo_url ? (
-            <img src={tenant.logo_url} alt=""
-              className="h-8 w-8 shrink-0 rounded-lg object-cover" />
-          ) : tenant?.name ? (
-            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-sm font-bold text-white"
-              style={{ background: tenant.brand_primary || '#E15926' }}>
-              {tenant.name[0]}
-            </span>
-          ) : (
-            <Logo size={32} className="shrink-0" />
-          )}
-          <div className="min-w-0 flex-1">
-            <p className="text-[13.5px] font-semibold text-ink truncate leading-tight">{tenant?.name || 'Phoenixx OS'}</p>
-            <p className="text-[11px] text-subtle truncate leading-tight">
-              {subscription?.plan_name} {subscription?.status === 'trial' && '· trial'}
-            </p>
-          </div>
+        <div className="flex items-center justify-between px-7 h-[84px] shrink-0">
+          <Link to="/" aria-label="TeamBridge home"><Wordmark size={34} /></Link>
           <button className="lg:hidden text-subtle hover:text-ink cursor-pointer" onClick={() => setSidebarOpen(false)} aria-label="Close menu">
-            <X size={18} />
+            <X size={20} />
           </button>
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-2.5 py-3 space-y-4">
-          {NAV.map((group) => {
-            const items = group.items.filter(visible);
-            if (!items.length) return null;
-            return (
-              <div key={group.section}>
-                <p className="label-cap px-2.5 mb-1">{group.section}</p>
-                <ul className="space-y-0.5">
-                  {items.map((item) => {
-                    const count = badgeFor(item.badge);
-                    return (
-                      <li key={item.to}>
-                        <NavLink
-                          to={item.to} end={!!item.exact}
-                          className={({ isActive }) => cx(
-                            'flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13.5px] font-medium',
-                            'transition-colors duration-150 cursor-pointer',
-                            isActive
-                              ? 'bg-brand-soft text-[var(--brand)]'
-                              : 'text-muted hover:bg-sunken hover:text-ink',
-                          )}
-                        >
-                          <item.icon size={16} className="shrink-0" />
-                          <span className="truncate flex-1">{item.label}</span>
-                          {count > 0 && (
-                            <span className={cx('rounded-full px-1.5 text-[10.5px] font-semibold tabular leading-[17px]',
-                              item.badge === 'overdue' ? 'bg-[var(--negative)] text-white' : 'bg-[var(--accent-bg)] text-slate-900')}>
-                              {count > 99 ? '99+' : count}
-                            </span>
-                          )}
-                        </NavLink>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            );
-          })}
-
-          {(ADMIN_NAV.some(visible) || isSuperAdmin) && (
-            <div>
-              <p className="label-cap px-2.5 mb-1">Admin</p>
-              <ul className="space-y-0.5">
-                {ADMIN_NAV.filter(visible).map((item) => (
-                  <li key={item.to}>
-                    <NavLink to={item.to}
-                      className={({ isActive }) => cx(
-                        'flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13.5px] font-medium transition-colors duration-150 cursor-pointer',
-                        isActive ? 'bg-brand-soft text-[var(--brand)]' : 'text-muted hover:bg-sunken hover:text-ink',
-                      )}>
-                      <item.icon size={16} className="shrink-0" />
-                      <span className="truncate">{item.label}</span>
-                    </NavLink>
+        <nav className="flex-1 overflow-y-auto px-4 pb-4" aria-label="Main">
+          <ul className="space-y-1">
+            {NAV.map((group) => {
+              if (group.item) {
+                if (!visible(group.item)) return null;
+                const active = matches(group.item, location.pathname, location.search);
+                return (
+                  <li key={group.label}>
+                    <NavRow to={group.item.to} icon={group.icon} label={group.label} active={active} count={badgeFor(group.item.badge)}
+                      urgent={group.item.badge === 'overdue'} />
                   </li>
-                ))}
-                {isSuperAdmin && (
-                  <li>
-                    <NavLink to="/admin"
-                      className={({ isActive }) => cx(
-                        'flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13.5px] font-medium transition-colors duration-150 cursor-pointer',
-                        isActive ? 'bg-brand-soft text-[var(--brand)]' : 'text-muted hover:bg-sunken hover:text-ink',
-                      )}>
-                      <ShieldCheck size={16} className="shrink-0" />
-                      <span className="truncate">Platform console</span>
-                    </NavLink>
+                );
+              }
+              const items = group.children.filter(visible);
+              if (!items.length) return null;
+              const current = activeOf(items, location.pathname, location.search);
+              // One page in the section: the section is that page.
+              if (items.length === 1) {
+                return (
+                  <li key={group.label}>
+                    <NavRow to={items[0].to} icon={group.icon} label={group.label} active={!!current}
+                      count={badgeFor(items[0].badge)} urgent={items[0].badge === 'overdue'} />
                   </li>
-                )}
-              </ul>
-            </div>
-          )}
+                );
+              }
+              const isOpen = open[group.label] ?? !!current;
+              const total = items.reduce((a, i) => a + badgeFor(i.badge), 0);
+              return (
+                <li key={group.label}>
+                  <button type="button" onClick={() => setOpen((o) => ({ ...o, [group.label]: !isOpen }))} aria-expanded={isOpen}
+                    className={cx(
+                      'flex w-full items-center gap-3.5 rounded-xl px-4 py-2.5 text-[15px] transition-colors duration-150 cursor-pointer',
+                      current && !isOpen ? 'bg-brand-soft text-[var(--brand)] font-medium' : current ? 'text-[var(--brand)] font-medium' : 'text-muted hover:bg-sunken hover:text-ink',
+                    )}>
+                    <group.icon size={20} strokeWidth={1.8} className="shrink-0" />
+                    <span className="flex-1 truncate text-left">{group.label}</span>
+                    {!isOpen && total > 0 && <Count n={total} urgent={items.some((i) => i.badge === 'overdue' && badgeFor('overdue') > 0)} />}
+                    <ChevronDown size={16} className={cx('shrink-0 text-subtle transition-transform duration-200', isOpen && 'rotate-180')} />
+                  </button>
+                  {isOpen && (
+                    <ul className="mt-0.5 mb-1.5 ml-[26px] space-y-0.5 border-l border-line pl-3">
+                      {items.map((i) => {
+                        const on = current === i;
+                        const n = badgeFor(i.badge);
+                        return (
+                          <li key={i.to}>
+                            <Link to={i.to} aria-current={on ? 'page' : undefined}
+                              className={cx('flex items-center gap-2 rounded-lg px-3 py-2 text-[14px] transition-colors duration-150',
+                                on ? 'bg-brand-soft text-[var(--brand)] font-medium' : 'text-subtle hover:bg-sunken hover:text-ink')}>
+                              <span className="flex-1 truncate">{i.label}</span>
+                              {n > 0 && <Count n={n} urgent={i.badge === 'overdue'} />}
+                            </Link>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
         </nav>
 
-        {subscription?.status === 'trial' && (
-          <div className="mx-2.5 mb-2.5 rounded-lg border border-[color-mix(in_srgb,var(--accent)_30%,transparent)] bg-accent-soft p-3">
-            <p className="text-[12.5px] font-semibold text-[var(--accent)]">Trial in progress</p>
-            <p className="text-[12px] text-muted mt-0.5 leading-snug">
-              Ends {relative(subscription.trial_ends_at)}. No card on file yet.
+        {showUpgrade && (
+          <div className="mx-4 mb-4 rounded-2xl bg-sunken px-4 py-5 text-center">
+            <Sparkles size={24} className="mx-auto text-[var(--brand-vivid)]" fill="currentColor" strokeWidth={1.2} />
+            <p className="mt-2.5 text-[16px] font-semibold tracking-[-0.01em] text-ink">
+              {subscription?.status === 'trial' ? 'Trial in progress' : 'Upgrade to Pro'}
             </p>
-            <Button variant="accent" size="sm" className="mt-2 w-full justify-center"
-              onClick={() => navigate('/billing')}>Choose a plan</Button>
+            <p className="mt-1 text-[13px] leading-snug text-subtle">
+              {subscription?.status === 'trial' && subscription?.trial_ends_at
+                ? `Ends ${relative(subscription.trial_ends_at)}. Choose a plan to keep everything running.`
+                : 'Unlock advanced features for your whole team.'}
+            </p>
+            <Button variant="accent" className="mt-3.5 w-full justify-center" onClick={() => navigate('/billing')}>
+              {subscription?.status === 'trial' ? 'Choose a plan' : 'Upgrade Now'} <ArrowRight size={15} />
+            </Button>
           </div>
         )}
+
+        <UserCard signOut={signOut} />
       </aside>
 
       {/* ------------------------------------------------------------- main */}
       <div className="flex-1 min-w-0 flex flex-col">
         <TopBar onMenu={() => setSidebarOpen(true)} dark={dark} toggleTheme={toggle} signOut={signOut} />
-        <main className="flex-1 min-w-0 px-4 py-5 sm:px-6 lg:px-7 max-w-[1600px] w-full mx-auto">
+        <main className="flex-1 min-w-0 px-4 pt-3 pb-10 sm:px-8 max-w-[1600px] w-full mx-auto">
           <PushBanner />
           <Outlet />
         </main>
         <TodoReminders />
-        <footer className="border-t border-line px-4 sm:px-6 py-3 text-[12px] text-subtle flex flex-wrap gap-x-4 gap-y-1 justify-between no-print">
-          <span>Phoenixx OS · {tenant?.name}</span>
-          <span>All times {tenant?.timezone?.replace('_', ' ')} · amounts in {tenant?.currency}</span>
-        </footer>
       </div>
     </div>
+  );
+}
+
+function Count({ n, urgent }: { n: number; urgent?: boolean }) {
+  return (
+    <span className={cx('rounded-full px-1.5 text-[11px] font-semibold tabular leading-[18px] min-w-[18px] text-center',
+      urgent ? 'bg-[var(--negative)] text-white' : 'bg-brand-soft text-[var(--brand)]')}>
+      {n > 99 ? '99+' : n}
+    </span>
+  );
+}
+
+function NavRow({ to, icon: Icon, label, active, count, urgent }: {
+  to: string; icon: any; label: string; active: boolean; count: number; urgent?: boolean;
+}) {
+  return (
+    <Link to={to} aria-current={active ? 'page' : undefined}
+      className={cx('flex items-center gap-3.5 rounded-xl px-4 py-2.5 text-[15px] transition-colors duration-150',
+        active ? 'bg-brand-soft text-[var(--brand)] font-medium' : 'text-muted hover:bg-sunken hover:text-ink')}>
+      <Icon size={20} strokeWidth={active ? 2.1 : 1.8} className="shrink-0" fill={active ? 'currentColor' : 'none'} fillOpacity={active ? 0.14 : 0} />
+      <span className="flex-1 truncate">{label}</span>
+      {count > 0 && <Count n={count} urgent={urgent} />}
+    </Link>
+  );
+}
+
+/** The person signed in, at the foot of the sidebar - opens their menu. */
+function UserCard({ signOut }: { signOut: () => void }) {
+  const { user, tenant, can } = useAuth();
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, []);
+  return (
+    <div className="relative border-t border-line px-4 py-3.5" ref={ref}>
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-haspopup="menu"
+        className="flex w-full items-center gap-3 rounded-xl px-2 py-1.5 text-left hover:bg-sunken transition-colors cursor-pointer">
+        <Avatar name={user?.name} url={user?.avatar_url} size={36} />
+        <span className="min-w-0 flex-1 leading-tight">
+          <span className="block truncate text-[14.5px] font-medium text-ink">{user?.name}</span>
+          <span className="block truncate text-[12.5px] text-subtle capitalize">{user?.role?.replace('_', ' ')}</span>
+        </span>
+        <ChevronDown size={16} className={cx('shrink-0 text-subtle transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <div role="menu" className="absolute bottom-full left-4 right-4 mb-2 card p-1.5 shadow-[var(--shadow-lg)] animate-in z-30">
+          <div className="px-3 py-2 border-b border-line mb-1">
+            <p className="text-[13px] text-subtle truncate">{user?.email}</p>
+            {tenant && <p className="text-[12px] text-subtle truncate mt-0.5">{tenant.name}</p>}
+          </div>
+          <MenuButton onClick={() => { setOpen(false); navigate('/profile'); }}>Profile & notifications</MenuButton>
+          {can('settings', 'view') && <MenuButton onClick={() => { setOpen(false); navigate('/settings'); }}>Workspace settings</MenuButton>}
+          <MenuButton danger onClick={signOut}><LogOut size={14} /> Sign out</MenuButton>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MenuButton({ children, onClick, danger }: { children: React.ReactNode; onClick: () => void; danger?: boolean }) {
+  return (
+    <button type="button" role="menuitem" onClick={onClick}
+      className={cx('flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13.5px] transition-colors cursor-pointer',
+        danger ? 'text-[var(--negative)] hover:bg-negative-soft' : 'text-muted hover:bg-sunken hover:text-ink')}>
+      {children}
+    </button>
   );
 }
 
@@ -312,9 +390,11 @@ export default function Layout() {
 function TopBar({ onMenu, dark, toggleTheme, signOut }: {
   onMenu: () => void; dark: boolean; toggleTheme: () => void; signOut: () => void;
 }) {
-  const { user, tenant } = useAuth();
+  const { user, tenant, can } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const canAssist = ASSISTANT_ROLES.includes(user?.role || '');
   const navigate = useNavigate();
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -327,54 +407,54 @@ function TopBar({ onMenu, dark, toggleTheme, signOut }: {
   }, []);
 
   return (
-    <header className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-line bg-raised/95 backdrop-blur px-4 sm:px-6 no-print">
+    <header className="sticky top-0 z-20 flex h-[84px] items-center gap-3 bg-surface/90 backdrop-blur px-4 sm:px-8 no-print">
       <button onClick={onMenu} aria-label="Open navigation"
-        className="lg:hidden text-muted hover:text-ink transition-colors cursor-pointer p-1.5 -ml-1.5 rounded">
-        <Menu size={20} />
+        className="lg:hidden text-muted hover:text-ink transition-colors cursor-pointer p-2 -ml-2 rounded-lg">
+        <Menu size={22} />
       </button>
 
       <GlobalSearch />
 
-      <div className="ml-auto flex items-center gap-1">
-        <button onClick={toggleTheme} aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
-          className="grid h-9 w-9 place-items-center rounded-md text-muted hover:bg-sunken hover:text-ink transition-colors duration-150 cursor-pointer">
-          {dark ? <Sun size={17} /> : <Moon size={17} />}
-        </button>
+      <div className="ml-auto flex items-center gap-1.5 sm:gap-2.5">
+        {canAssist && (
+          <button onClick={() => setAssistantOpen(true)} aria-label="Open the AI Task Assistant" title="AI Task Assistant"
+            className="inline-flex h-10 items-center gap-1.5 rounded-full bg-brand-soft px-3.5 text-[13.5px] font-medium text-[var(--brand)] hover:brightness-[0.97] transition cursor-pointer">
+            <Sparkles size={16} />
+            <span className="hidden md:inline">Assign by voice</span>
+          </button>
+        )}
+        {canAssist && assistantOpen && (
+          <Suspense fallback={null}>
+            <TaskAssistant open={assistantOpen} onClose={() => setAssistantOpen(false)} />
+          </Suspense>
+        )}
 
         <NotificationBell open={bellOpen} setOpen={setBellOpen} />
 
+        <button onClick={toggleTheme} aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'} title={dark ? 'Light mode' : 'Dark mode'}
+          className="grid h-10 w-10 place-items-center rounded-full text-ink hover:bg-sunken transition-colors duration-150 cursor-pointer">
+          {dark ? <Moon size={21} strokeWidth={1.8} /> : <Sun size={22} strokeWidth={1.8} />}
+        </button>
+
         <div className="relative" ref={menuRef}>
           <button onClick={() => setMenuOpen((o) => !o)}
-            aria-expanded={menuOpen} aria-haspopup="menu"
-            className="flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-sunken transition-colors duration-150 cursor-pointer">
-            <Avatar name={user?.name} url={user?.avatar_url} size={28} />
-            <span className="hidden sm:block text-left leading-tight">
-              <span className="block text-[13px] font-medium text-ink max-w-[120px] truncate">{user?.name}</span>
-              <span className="block text-[11px] text-subtle capitalize">{user?.role?.replace('_', ' ')}</span>
-            </span>
-            <ChevronDown size={14} className="text-subtle hidden sm:block" />
+            aria-expanded={menuOpen} aria-haspopup="menu" aria-label="Your account"
+            className="flex items-center gap-1.5 rounded-full p-1 pr-1.5 hover:bg-sunken transition-colors duration-150 cursor-pointer">
+            <Avatar name={user?.name} url={user?.avatar_url} size={36} />
+            <ChevronDown size={16} className="text-ink hidden sm:block" />
           </button>
 
           {menuOpen && (
             <div role="menu"
-              className="absolute right-0 mt-1.5 w-60 card p-1.5 shadow-[var(--shadow-lg)] animate-in z-30">
-              <div className="px-2.5 py-2 border-b border-line mb-1">
-                <p className="text-[13px] font-medium text-ink truncate">{user?.name}</p>
-                <p className="text-[12px] text-subtle truncate">{user?.email}</p>
-                {tenant && <p className="text-[11px] text-subtle mt-1">{tenant.name}</p>}
+              className="absolute right-0 mt-2 w-64 card p-1.5 shadow-[var(--shadow-lg)] animate-in z-30">
+              <div className="px-3 py-2.5 border-b border-line mb-1">
+                <p className="text-[14px] font-medium text-ink truncate">{user?.name}</p>
+                <p className="text-[12.5px] text-subtle truncate">{user?.email}</p>
+                {tenant && <p className="text-[12px] text-subtle mt-1 truncate">{tenant.name}</p>}
               </div>
-              <button onClick={() => { setMenuOpen(false); navigate('/profile'); }} role="menuitem"
-                className="w-full text-left px-2.5 py-2 rounded text-[13px] text-muted hover:bg-sunken hover:text-ink transition-colors cursor-pointer">
-                Profile & notifications
-              </button>
-              <button onClick={() => { setMenuOpen(false); navigate('/settings'); }} role="menuitem"
-                className="w-full text-left px-2.5 py-2 rounded text-[13px] text-muted hover:bg-sunken hover:text-ink transition-colors cursor-pointer">
-                Workspace settings
-              </button>
-              <button onClick={signOut} role="menuitem"
-                className="w-full text-left px-2.5 py-2 rounded text-[13px] text-[var(--negative)] hover:bg-negative-soft transition-colors cursor-pointer flex items-center gap-2 mt-1">
-                <LogOut size={14} /> Sign out
-              </button>
+              <MenuButton onClick={() => { setMenuOpen(false); navigate('/profile'); }}>Profile & notifications</MenuButton>
+              {can('settings', 'view') && <MenuButton onClick={() => { setMenuOpen(false); navigate('/settings'); }}>Workspace settings</MenuButton>}
+              <MenuButton danger onClick={signOut}><LogOut size={14} /> Sign out</MenuButton>
             </div>
           )}
         </div>
@@ -424,22 +504,20 @@ function GlobalSearch() {
   const go = (path: string) => { setOpen(false); setQ(''); navigate(path); };
 
   return (
-    <div className="relative flex-1 max-w-md" ref={boxRef}>
-      <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-subtle pointer-events-none" />
+    <div className="relative flex-1 max-w-[590px]" ref={boxRef}>
+      <Search size={19} strokeWidth={1.8} className="absolute left-5 top-1/2 -translate-y-1/2 text-subtle pointer-events-none" />
       <input
         value={q}
         onChange={(e) => { setQ(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
-        placeholder="Search clients and action items…"
-        aria-label="Search"
-        className="h-9 w-full rounded-md border border-line bg-sunken pl-8 pr-14 text-sm text-ink
-                   placeholder:text-subtle transition-colors duration-150 focus:bg-raised focus:border-line-strong"
+        placeholder="Search anything... (⌘ + K)"
+        aria-label="Search clients and tasks"
+        className="h-12 w-full rounded-full border border-transparent bg-[color-mix(in_srgb,var(--surface-sunken)_85%,var(--border))] pl-12 pr-5 text-[14.5px] text-ink
+                   placeholder:text-subtle transition-[background-color,border-color,box-shadow] duration-150 focus:outline-none focus:bg-raised focus:border-line-strong focus:shadow-[var(--shadow-md)]"
       />
-      <kbd className="absolute right-2 top-1/2 -translate-y-1/2 hidden sm:block text-[10.5px] text-subtle
-                      border border-line rounded px-1.5 py-0.5 pointer-events-none mono">⌘K</kbd>
 
       {open && q.trim().length >= 2 && (
-        <div className="absolute top-full left-0 right-0 mt-1.5 card p-1.5 shadow-[var(--shadow-lg)] max-h-[70vh] overflow-y-auto animate-in z-30">
+        <div className="absolute top-full left-0 right-0 mt-2 card p-1.5 shadow-[var(--shadow-lg)] max-h-[70vh] overflow-y-auto animate-in z-30">
           {!data?.clients?.length && !data?.items?.length ? (
             <p className="px-3 py-4 text-[13px] text-subtle text-center">No matches for “{q}”</p>
           ) : (
@@ -525,18 +603,14 @@ function NotificationBell({ open, setOpen }: { open: boolean; setOpen: (v: boole
   return (
     <div className="relative" ref={ref}>
       <button onClick={() => setOpen(!open)} aria-label={`Notifications${unread ? `, ${unread} unread` : ''}`}
-        className="relative grid h-9 w-9 place-items-center rounded-md text-muted hover:bg-sunken hover:text-ink transition-colors duration-150 cursor-pointer">
-        <Bell size={17} />
-        {unread > 0 && (
-          <span className="absolute top-1 right-1 grid min-w-[16px] h-4 place-items-center rounded-full
-                           bg-[var(--negative)] px-1 text-[10px] font-semibold text-white tabular">
-            {unread > 9 ? '9+' : unread}
-          </span>
-        )}
+        className="relative grid h-10 w-10 place-items-center rounded-full text-ink hover:bg-sunken transition-colors duration-150 cursor-pointer">
+        <Bell size={22} strokeWidth={1.8} />
+        {/* The design's red dot; the number is in the label for screen readers and in the panel. */}
+        {unread > 0 && <span className="absolute top-2 right-2.5 h-2.5 w-2.5 rounded-full bg-[var(--negative)] ring-2 ring-[var(--surface)]" aria-hidden />}
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-1.5 w-[min(23rem,calc(100vw-2rem))] card shadow-[var(--shadow-lg)] animate-in z-30 overflow-hidden">
+        <div className="absolute right-0 mt-2 w-[min(24rem,calc(100vw-2rem))] card shadow-[var(--shadow-lg)] animate-in z-30 overflow-hidden">
           <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-line">
             <p className="text-[13.5px] font-semibold text-ink">Notifications</p>
             {unread > 0 && (

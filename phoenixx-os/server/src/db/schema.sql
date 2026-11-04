@@ -1920,3 +1920,170 @@ CREATE TABLE IF NOT EXISTS stored_files (
   data BYTEA NOT NULL,
   created_at TEXT NOT NULL
 );
+
+-- ---------------------------------------------------------------- AI MEETING INTELLIGENCE
+-- A recording or transcript an Owner or Manager uploaded for analysis. Tasks
+-- are only ever PROPOSED here (ai_meeting_items); each becomes a real action
+-- item only when a reviewer approves it.
+CREATE TABLE IF NOT EXISTS ai_meetings (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id),
+  title TEXT NOT NULL,
+  meeting_date TEXT,                       -- YYYY-MM-DD; relative deadlines resolve against it
+  project_id TEXT REFERENCES projects(id),
+  client_id TEXT REFERENCES clients(id),
+  department TEXT,
+  description TEXT,
+  source_kind TEXT NOT NULL,               -- recording | transcript
+  file_name TEXT,
+  file_mime TEXT,
+  file_size INTEGER,
+  file_sha256 TEXT,                        -- duplicate-upload warning
+  duration_seconds REAL,
+  consent_by TEXT NOT NULL REFERENCES users(id),
+  consent_at TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'uploading', -- uploading|queued|transcribing|analyzing|review|completed|failed
+  failed_stage TEXT,                       -- transcribing|extracting|analyzing
+  error TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  lease_until TEXT,                        -- one worker at a time per meeting
+  parts_expected INTEGER NOT NULL DEFAULT 1,
+  transcript_json TEXT,                    -- [{i, start, end, speaker, text}] - the original, kept for verification
+  summary_json TEXT,
+  extras_json TEXT,                        -- unassigned / unclear deadlines / pending decisions / issues / follow-ups
+  speakers_json TEXT,                      -- {label: user_id} set by the reviewer
+  analysis_model TEXT,
+  audio_purged_at TEXT,
+  uploaded_by TEXT NOT NULL REFERENCES users(id),
+  completed_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_aim_tenant ON ai_meetings(tenant_id, created_at);
+CREATE INDEX IF NOT EXISTS ix_aim_status ON ai_meetings(status, lease_until);
+CREATE INDEX IF NOT EXISTS ix_aim_hash ON ai_meetings(tenant_id, file_sha256);
+
+-- The uploaded bytes, in parts (an audio recording is split into ~10-minute
+-- pieces in the browser; a transcript document is one part). The bytes live
+-- in stored_files and are deleted once transcribed.
+CREATE TABLE IF NOT EXISTS ai_meeting_parts (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id),
+  meeting_id TEXT NOT NULL REFERENCES ai_meetings(id),
+  part_index INTEGER NOT NULL,
+  offset_seconds REAL NOT NULL DEFAULT 0,
+  mime TEXT NOT NULL,
+  size_expected INTEGER NOT NULL,
+  size_received INTEGER NOT NULL DEFAULT 0,
+  storage_path TEXT NOT NULL,
+  segments_json TEXT,                      -- this part's transcript, offsets applied
+  transcribed_at TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE (meeting_id, part_index)
+);
+
+-- One proposed task. Never an action item until approved.
+CREATE TABLE IF NOT EXISTS ai_meeting_items (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id),
+  meeting_id TEXT NOT NULL REFERENCES ai_meetings(id),
+  idx INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT,
+  assignee_name TEXT,                      -- as spoken; never trusted on its own
+  assignee_speaker TEXT,                   -- "I'll do it" from a speaker label
+  assignee_user_id TEXT REFERENCES users(id),
+  assignee_status TEXT NOT NULL,           -- matched|ambiguous|not_found|unassigned|out_of_scope|speaker_unmapped
+  candidates_json TEXT,                    -- the people an ambiguous name could mean
+  assigned_by_name TEXT,
+  acceptance TEXT NOT NULL DEFAULT 'unclear', -- accepted|not_confirmed|declined|unclear
+  deadline_text TEXT,                      -- as said ("by Friday")
+  due_date TEXT,
+  due_time TEXT,
+  deadline_status TEXT NOT NULL,           -- none|resolved|ambiguous|needs_meeting_date
+  priority TEXT,
+  related_text TEXT,
+  project_id TEXT REFERENCES projects(id),
+  client_id TEXT REFERENCES clients(id),
+  evidence_json TEXT,                      -- {segments:[i...], quote}
+  start_seconds REAL,
+  confidence TEXT NOT NULL DEFAULT 'medium', -- high|medium|low
+  status TEXT NOT NULL DEFAULT 'proposed', -- proposed|approving|approved|rejected|cancelled_in_meeting
+  reviewer_edited INTEGER NOT NULL DEFAULT 0,
+  action_item_id TEXT REFERENCES action_items(id),
+  decided_by TEXT REFERENCES users(id),
+  decided_at TEXT,
+  reject_reason TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_aimi_meeting ON ai_meeting_items(meeting_id, idx);
+CREATE INDEX IF NOT EXISTS ix_aimi_status ON ai_meeting_items(tenant_id, status);
+
+-- The last line of defence against a double approval: one proposed meeting
+-- task can become at most one action item, whatever races ahead of this.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_ai_meeting_task
+  ON action_items(tenant_id, source_id) WHERE source_type = 'meeting_ai';
+
+-- ---------------------------------------------------------------- AI MEETINGS: LIVE ROOMS
+-- Consent given at the pre-join screen of a meeting that allows recording or
+-- transcription. One row per person per join, kept as the record.
+CREATE TABLE IF NOT EXISTS meeting_consents (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id),
+  meeting_id TEXT NOT NULL REFERENCES meetings(id),
+  user_id TEXT NOT NULL REFERENCES users(id),
+  recording INTEGER NOT NULL DEFAULT 0,      -- agreed to be recorded
+  transcription INTEGER NOT NULL DEFAULT 0,  -- agreed to be transcribed
+  ip TEXT,
+  user_agent TEXT,
+  given_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_mconsent ON meeting_consents(meeting_id, user_id);
+
+-- Who was actually in the room and for how long, from LiveKit's signed
+-- webhooks. One row per connection (a reconnect is a new connection).
+CREATE TABLE IF NOT EXISTS meeting_participation (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id),
+  meeting_id TEXT NOT NULL REFERENCES meetings(id),
+  user_id TEXT REFERENCES users(id),
+  participant_sid TEXT NOT NULL,
+  joined_at TEXT NOT NULL,
+  left_at TEXT,
+  UNIQUE (meeting_id, participant_sid)
+);
+CREATE INDEX IF NOT EXISTS ix_mpart_user ON meeting_participation(meeting_id, user_id);
+
+-- Files LiveKit Egress wrote to object storage for a live meeting: the video
+-- recording (kind 'video') and one audio file per microphone track (kind
+-- 'audio_track', for a transcript where every line has a known speaker).
+-- Audio files are deleted once transcribed; videos stay until someone deletes them.
+CREATE TABLE IF NOT EXISTS meeting_recordings (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id),
+  meeting_id TEXT NOT NULL REFERENCES meetings(id),
+  kind TEXT NOT NULL,                        -- video | audio_track
+  egress_id TEXT,
+  track_sid TEXT,
+  participant_identity TEXT,
+  user_id TEXT REFERENCES users(id),
+  speaker_name TEXT,
+  s3_key TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'starting',   -- starting | active | complete | failed
+  error TEXT,
+  file_started_at TEXT,
+  file_ended_at TEXT,
+  duration_seconds REAL,
+  size_bytes INTEGER,
+  started_by TEXT REFERENCES users(id),
+  purged_at TEXT,
+  deleted_at TEXT,
+  deleted_by TEXT REFERENCES users(id),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_mrec_meeting ON meeting_recordings(meeting_id, kind);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_mrec_egress ON meeting_recordings(egress_id) WHERE egress_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_mrec_track ON meeting_recordings(meeting_id, track_sid) WHERE track_sid IS NOT NULL;

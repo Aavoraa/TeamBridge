@@ -19,6 +19,7 @@ import PersonalTodos from '../components/PersonalTodos';
 import { TodoPlanSection } from '../components/TomorrowTodo';
 import { announceCheckIn } from '../components/TodoReminders';
 import { DailyUpdateModal } from '../components/DailyUpdate';
+import DashboardOverview from '../components/DashboardOverview';
 
 /**
  * The landing page answers one question: what does *this person* need to do
@@ -101,8 +102,8 @@ export default function Home() {
   return (
     <>
       <PageHeader
-        title={`${greeting}, ${data?.greeting_name || user?.name?.split(' ')[0]}`}
-        subtitle={date(new Date().toISOString(), 'long')}
+        title="Dashboard Overview"
+        subtitle={`${greeting}, ${data?.greeting_name || user?.name?.split(' ')[0]} · ${date(new Date().toISOString(), 'long')}`}
         actions={
           <>
             {can('action_items', 'create') && (
@@ -139,8 +140,18 @@ export default function Home() {
         }
       />
 
+      {/* The design's overview: figures, trend, funnel, activity and schedule. */}
+      <DashboardOverview home={data} />
+
+      <div className="mt-10 mb-4 flex items-end justify-between gap-3">
+        <div>
+          <h2 className="text-[21px] font-semibold tracking-[-0.02em] text-ink">Your day</h2>
+          <p className="mt-0.5 text-[14px] text-subtle">Your tasks, plans and team, for today.</p>
+        </div>
+      </div>
+
       {/* ------------------------------------------------------- counters */}
-      <div className="grid gap-3 grid-cols-2 lg:grid-cols-6 mb-5">
+      <div className="grid gap-4 grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 mb-6">
         <Stat label="Overdue" value={c.overdue ?? 0} tone={c.overdue ? 'negative' : 'neutral'}
           icon={<AlertTriangle size={15} />} onClick={() => navigate('/action-items?overdue=true')}
           sub={c.overdue ? 'needs attention now' : 'nothing overdue'} />

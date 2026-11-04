@@ -60,9 +60,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     syncPush();
     if (data.tenant) {
       configureLocale(data.tenant);
-      // The tenant's own brand colour drives the UI accent (tenant branding).
-      document.documentElement.style.setProperty('--brand', data.tenant.brand_primary);
-      document.title = `Phoenixx OS · ${data.tenant.name}`;
+      // The app keeps one look (TeamBridge green) for every workspace. A workspace's
+      // own brand colour goes on what it sends out - invoices, proposals, reports -
+      // which read brand_primary directly. Clear any override an older build set.
+      document.documentElement.style.removeProperty('--brand');
+      document.title = `TeamBridge · ${data.tenant.name}`;
     }
   };
 

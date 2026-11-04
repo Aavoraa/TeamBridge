@@ -4,8 +4,9 @@ import {
   type SelectHTMLAttributes, type TextareaHTMLAttributes,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { X, ChevronDown, Check, AlertCircle, Loader2, Inbox, Search } from 'lucide-react';
-import { initials, avatarColor } from '../lib/format';
+import { X, ChevronDown, Check, AlertCircle, Loader2, Inbox, Search, ArrowUp, ArrowDown } from 'lucide-react';
+import { useStockPhoto, avatarTint } from '../lib/avatar';
+import { initials, avatarStyle } from '../lib/format';
 
 export const cx = (...parts: (string | false | null | undefined)[]) => parts.filter(Boolean).join(' ');
 
@@ -21,8 +22,9 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 // dark and takes white, on dark it is light and takes near-black. The paired
 // --*-contrast token flips with the theme so both stay AA.
 const BUTTON_VARIANTS = {
-  primary: 'bg-[var(--brand)] text-[var(--brand-contrast)] hover:brightness-110 border-transparent shadow-[var(--shadow-sm)]',
-  accent: 'bg-[var(--accent-bg)] text-[var(--accent-contrast)] hover:brightness-105 border-transparent shadow-[var(--shadow-sm)] font-semibold',
+  primary: 'bg-[var(--brand)] text-[var(--brand-contrast)] hover:brightness-110 border-transparent',
+  // The soft green of the design's "Upgrade Now": a quieter call to action.
+  accent: 'bg-brand-soft text-[var(--brand)] hover:brightness-[0.97] border-transparent font-semibold',
   secondary: 'bg-raised text-ink border-line-strong hover:bg-sunken',
   ghost: 'bg-transparent text-muted border-transparent hover:bg-sunken hover:text-ink',
   danger: 'bg-[var(--negative)] text-[var(--negative-contrast)] hover:brightness-110 border-transparent',
@@ -30,10 +32,10 @@ const BUTTON_VARIANTS = {
 
 const BUTTON_SIZES = {
   // Every size clears the 44px touch target on coarse pointers via min-h.
-  sm: 'h-8 px-2.5 text-[13px] gap-1.5 min-h-[32px]',
-  md: 'h-9 px-3.5 text-sm gap-2',
-  lg: 'h-11 px-5 text-[15px] gap-2',
-  icon: 'h-9 w-9 justify-center',
+  sm: 'h-8 px-3 text-[13px] gap-1.5 min-h-[32px] rounded-[9px]',
+  md: 'h-10 px-4 text-[14px] gap-2 rounded-[10px]',
+  lg: 'h-11 px-5 text-[15px] gap-2 rounded-[12px]',
+  icon: 'h-10 w-10 justify-center rounded-[10px]',
 };
 
 export function Button({
@@ -44,7 +46,7 @@ export function Button({
       {...props}
       disabled={disabled || loading}
       className={cx(
-        'inline-flex items-center rounded-md border font-medium transition-colors duration-150',
+        'inline-flex items-center border font-medium transition-[background-color,color,filter] duration-150',
         'disabled:opacity-50 disabled:pointer-events-none cursor-pointer select-none whitespace-nowrap',
         BUTTON_VARIANTS[variant], BUTTON_SIZES[size], className,
       )}
@@ -58,14 +60,15 @@ export function Button({
 /* =============================================================== BADGE */
 type Tone = 'neutral' | 'brand' | 'positive' | 'negative' | 'warning' | 'accent' | 'info';
 
+// Soft pills with no outline, like the design's "Meeting" and "Review" tags.
 const TONES: Record<Tone, string> = {
-  neutral: 'bg-sunken text-muted border-line',
-  brand: 'bg-brand-soft text-[var(--brand)] border-[color-mix(in_srgb,var(--brand)_25%,transparent)]',
-  info: 'bg-info-soft text-[var(--info)] border-[color-mix(in_srgb,var(--info)_25%,transparent)]',
-  positive: 'bg-positive-soft text-[var(--positive)] border-[color-mix(in_srgb,var(--positive)_25%,transparent)]',
-  negative: 'bg-negative-soft text-[var(--negative)] border-[color-mix(in_srgb,var(--negative)_25%,transparent)]',
-  warning: 'bg-warning-soft text-[var(--warning)] border-[color-mix(in_srgb,var(--warning)_28%,transparent)]',
-  accent: 'bg-accent-soft text-[var(--accent)] border-[color-mix(in_srgb,var(--accent)_28%,transparent)]',
+  neutral: 'bg-sunken text-muted',
+  brand: 'bg-brand-soft text-[var(--brand)]',
+  info: 'bg-info-soft text-[var(--info)]',
+  positive: 'bg-positive-soft text-[var(--positive)]',
+  negative: 'bg-negative-soft text-[var(--negative)]',
+  warning: 'bg-warning-soft text-[var(--warning)]',
+  accent: 'bg-accent-soft text-[var(--accent)]',
 };
 
 export function Badge({ tone = 'neutral', children, className, dot }: {
@@ -73,7 +76,7 @@ export function Badge({ tone = 'neutral', children, className, dot }: {
 }) {
   return (
     <span className={cx(
-      'inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11.5px] font-medium leading-5 whitespace-nowrap',
+      'inline-flex items-center gap-1.5 rounded-full border border-transparent px-2.5 py-0.5 text-[12px] font-medium leading-5 whitespace-nowrap',
       TONES[tone], className,
     )}>
       {dot && <span className="h-1.5 w-1.5 rounded-full bg-current shrink-0" aria-hidden />}
@@ -116,15 +119,15 @@ export function CardHeader({ title, subtitle, action, icon, className }: {
   title: ReactNode; subtitle?: ReactNode; action?: ReactNode; icon?: ReactNode; className?: string;
 }) {
   return (
-    <div className={cx('flex items-start justify-between gap-3 border-b border-line px-4 py-3', className)}>
-      <div className="min-w-0 flex-1 flex items-start gap-2.5">
-        {icon && <span className="mt-0.5 text-[var(--brand)] shrink-0">{icon}</span>}
+    <div className={cx('flex items-start justify-between gap-3 px-5 pt-5 pb-3', className)}>
+      <div className="min-w-0 flex-1 flex items-center gap-2.5">
+        {icon && <span className="text-[var(--brand-vivid)] shrink-0">{icon}</span>}
         <div className="min-w-0">
-          <h2 className="text-[15px] font-semibold text-ink leading-tight truncate">{title}</h2>
-          {subtitle && <p className="text-[13px] text-subtle mt-0.5 leading-snug break-words">{subtitle}</p>}
+          <h2 className="text-[17px] font-semibold text-ink leading-tight tracking-[-0.015em] truncate">{title}</h2>
+          {subtitle && <p className="text-[13.5px] text-subtle mt-1 leading-snug break-words">{subtitle}</p>}
         </div>
       </div>
-      {action && <div className="shrink-0 flex items-center gap-2">{action}</div>}
+      {action && <div className="shrink-0 flex items-center gap-2 text-[13.5px]">{action}</div>}
     </div>
   );
 }
@@ -165,66 +168,67 @@ export function Sparkline({ data, tone = 'var(--brand)', width = 68, height = 22
   );
 }
 
+/** "↑ +18.2% vs last month" - the change line under a figure. `invert` when a rise is bad (costs). */
+export function Delta({ value, suffix = '%', invert, label = 'vs last month', className }: {
+  value: number; suffix?: string; invert?: boolean; label?: string; className?: string;
+}) {
+  if (!Number.isFinite(value)) return null;
+  const flat = Math.abs(value) < 0.05;
+  const good = invert ? value < 0 : value > 0;
+  const n = Math.abs(value).toFixed(Math.abs(value) < 10 ? 1 : 0);
+  return (
+    <p className={cx('flex items-center gap-1 text-[13px] tabular', className)}>
+      {flat ? <span className="font-medium text-subtle">No change</span> : (
+        <span className={cx('inline-flex items-center gap-0.5 font-medium', good ? 'text-[var(--positive)]' : 'text-[var(--negative)]')}>
+          {value > 0 ? <ArrowUp size={13} strokeWidth={2.4} /> : <ArrowDown size={13} strokeWidth={2.4} />}
+          {value > 0 ? '+' : '-'}{n}{suffix}
+        </span>
+      )}
+      {label && <span className="text-subtle">{label}</span>}
+    </p>
+  );
+}
+
+/**
+ * A key figure: a round tinted icon, the label in quiet grey, the value large,
+ * and the change underneath - the "Overview Analytics" tile of the design.
+ */
 export function Stat({ label, value, sub, delta, tone, icon, onClick, className, spark, accent }: {
   label: string; value: ReactNode; sub?: ReactNode;
-  delta?: { value: number; suffix?: string; invert?: boolean } | null;
+  delta?: { value: number; suffix?: string; invert?: boolean; label?: string } | null;
   tone?: Tone; icon?: ReactNode; onClick?: () => void; className?: string;
   /** Recent history for the inline sparkline — oldest first. */
   spark?: number[];
-  /** CSS colour driving the icon chip, sparkline and top edge. */
+  /** CSS colour driving the icon disc and the sparkline. */
   accent?: string;
 }) {
-  // A rising cost is bad and a rising profit is good — `invert` says which.
-  const good = delta ? (delta.invert ? delta.value < 0 : delta.value > 0) : false;
-  const flat = !delta || Math.abs(delta.value) < 0.05;
-  const hue = accent || (tone ? `var(--${tone})` : 'var(--brand)');
-
+  const hue = accent || (tone && tone !== 'neutral' ? `var(--${tone})` : 'var(--brand-vivid)');
   const Wrapper: any = onClick ? 'button' : 'div';
   return (
     <Wrapper
       onClick={onClick}
       className={cx(
-        'card relative overflow-hidden p-3.5 text-left w-full transition-all duration-150',
-        onClick && 'cursor-pointer hover:border-line-strong hover:shadow-[var(--shadow-md)]',
+        'card p-4 text-left w-full transition-shadow duration-150',
+        onClick && 'cursor-pointer hover:shadow-[var(--shadow-md)]',
         className,
       )}
     >
-      {/* a hairline of the accent across the top, and a soft wash behind it */}
-      <span aria-hidden className="absolute inset-x-0 top-0 h-[2px]" style={{ background: hue, opacity: 0.85 }} />
-      <span
-        aria-hidden
-        className="pointer-events-none absolute -right-8 -top-10 h-24 w-24 rounded-full opacity-[0.07]"
-        style={{ background: `radial-gradient(circle, ${hue}, transparent 70%)` }}
-      />
-
-      <div className="flex items-center gap-2">
+      <div className="flex items-start gap-3">
         {icon && (
-          <span
-            className="grid h-6 w-6 shrink-0 place-items-center rounded-md"
-            style={{ background: `color-mix(in srgb, ${hue} 14%, transparent)`, color: hue }}
-          >
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full"
+            style={{ background: `color-mix(in srgb, ${hue} 13%, transparent)`, color: hue }}>
             {icon}
           </span>
         )}
-        <span className="label-cap truncate">{label}</span>
-      </div>
-
-      <div className="mt-2 flex items-end justify-between gap-2">
-        <div className="min-w-0">
-          <div className="flex items-baseline gap-2 flex-wrap">
-            <span className="text-[23px] leading-7 font-semibold text-ink tabular tracking-[-0.01em]">{value}</span>
-            {delta && !flat && (
-              <span
-                className={cx('rounded px-1.5 py-px text-[11.5px] font-semibold tabular',
-                  good ? 'text-[var(--positive)] bg-positive-soft' : 'text-[var(--negative)] bg-negative-soft')}
-              >
-                {delta.value > 0 ? '▲' : '▼'} {Math.abs(delta.value).toFixed(Math.abs(delta.value) < 10 ? 1 : 0)}{delta.suffix ?? '%'}
-              </span>
-            )}
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[13.5px] text-subtle">{label}</p>
+          <div className="mt-0.5 flex items-end justify-between gap-2">
+            <span className="text-[26px] leading-8 font-semibold tracking-[-0.025em] text-ink tabular">{value}</span>
+            {spark && spark.length > 1 && <Sparkline data={spark} tone={hue} />}
           </div>
+          {delta && <Delta value={delta.value} suffix={delta.suffix} invert={delta.invert} label={delta.label ?? 'vs last period'} className="mt-1" />}
           {sub && <div className="mt-1 text-[12.5px] text-subtle leading-snug">{sub}</div>}
         </div>
-        {spark && spark.length > 1 && <Sparkline data={spark} tone={hue} />}
       </div>
     </Wrapper>
   );
@@ -241,7 +245,7 @@ export function Table({ children, className }: { children: ReactNode; className?
 }
 
 export const THead = ({ children }: { children: ReactNode }) => (
-  <thead className="bg-sunken">{children}</thead>
+  <thead className="bg-sunken/70">{children}</thead>
 );
 
 export function TH({ children, align = 'left', className, width }: {
@@ -251,7 +255,7 @@ export function TH({ children, align = 'left', className, width }: {
     <th
       style={width ? { width } : undefined}
       className={cx(
-        'label-cap px-3 py-2 font-semibold border-b border-line whitespace-nowrap',
+        'px-4 py-2.5 text-[12.5px] font-medium text-subtle border-b border-line whitespace-nowrap',
         align === 'right' && 'text-right', align === 'center' && 'text-center', align === 'left' && 'text-left',
         className,
       )}
@@ -268,7 +272,7 @@ export function TD({ children, align = 'left', className, colSpan, mono }: {
     <td
       colSpan={colSpan}
       className={cx(
-        'px-3 py-2.5 border-b border-line align-middle text-ink',
+        'px-4 py-3 border-b border-line align-middle text-ink',
         align === 'right' && 'text-right tabular', align === 'center' && 'text-center',
         mono && 'mono text-[13px]', className,
       )}
@@ -298,7 +302,7 @@ export function Field({ label, hint, error, required, children, className }: {
   return (
     <div className={cx('min-w-0', className)}>
       {label && (
-        <label htmlFor={id} className="block text-[13px] font-medium text-muted mb-1.5">
+        <label htmlFor={id} className="block text-[13.5px] font-medium text-ink mb-1.5">
           {label}{required && <span className="text-[var(--negative)] ml-0.5" aria-hidden>*</span>}
         </label>
       )}
@@ -313,13 +317,14 @@ export function Field({ label, hint, error, required, children, className }: {
 const FieldIdContext = createContext<string | undefined>(undefined);
 
 const inputBase =
-  'w-full rounded-md border border-line-strong bg-raised px-3 text-sm text-ink placeholder:text-subtle '
-  + 'transition-colors duration-150 hover:border-[var(--ink-subtle)] '
+  'w-full rounded-[10px] border border-line-strong bg-raised px-3.5 text-[14px] text-ink placeholder:text-subtle '
+  + 'transition-[border-color,box-shadow] duration-150 hover:border-[var(--ink-subtle)] '
+  + 'focus:outline-none focus:border-[var(--brand-vivid)] focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--brand-vivid)_18%,transparent)] '
   + 'disabled:opacity-60 disabled:cursor-not-allowed';
 
 export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
   const id = useContext(FieldIdContext);
-  return <input id={props.id || id} {...props} className={cx(inputBase, 'h-9', className)} />;
+  return <input id={props.id || id} {...props} className={cx(inputBase, 'h-10', className)} />;
 }
 
 /** Ref-forwarding: the chat composer needs the caret position to complete @names. */
@@ -340,11 +345,11 @@ export function Select({ className, children, ...props }: SelectHTMLAttributes<H
       <select
         id={props.id || id}
         {...props}
-        className={cx(inputBase, 'h-9 appearance-none pr-8 cursor-pointer', className)}
+        className={cx(inputBase, 'h-10 appearance-none pr-9 cursor-pointer', className)}
       >
         {children}
       </select>
-      <ChevronDown size={15} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-subtle" />
+      <ChevronDown size={16} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-subtle" />
     </div>
   );
 }
@@ -359,8 +364,8 @@ export function Checkbox({ label, checked, onChange, disabled }: {
         <input
           type="checkbox" checked={checked} disabled={disabled}
           onChange={(e) => onChange(e.target.checked)}
-          className="peer h-[17px] w-[17px] appearance-none rounded border border-line-strong bg-raised
-                     checked:bg-[var(--brand)] checked:border-[var(--brand)] transition-colors duration-150 cursor-pointer"
+          className="peer h-[18px] w-[18px] appearance-none rounded-[5px] border border-line-strong bg-raised
+                     checked:bg-[var(--brand-vivid)] checked:border-[var(--brand-vivid)] transition-colors duration-150 cursor-pointer"
         />
         <Check size={12} strokeWidth={3} className="pointer-events-none absolute text-white opacity-0 peer-checked:opacity-100" />
       </span>
@@ -374,11 +379,11 @@ export function SearchInput({ value, onChange, placeholder = 'Search…', classN
 }) {
   return (
     <div className={cx('relative', className)}>
-      <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-subtle pointer-events-none" />
+      <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-subtle pointer-events-none" />
       <input
         type="search" value={value} onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder} aria-label={placeholder}
-        className={cx(inputBase, 'h-9 pl-8')}
+        className={cx(inputBase, 'h-10 rounded-full bg-sunken border-transparent pl-10 hover:border-transparent')}
       />
     </div>
   );
@@ -416,12 +421,12 @@ export function Modal({ open, onClose, title, subtitle, children, footer, size =
         ref={ref} role="dialog" aria-modal="true" aria-label={title}
         className={cx(
           'relative w-full bg-raised border border-line shadow-[var(--shadow-lg)] animate-in',
-          'rounded-t-xl sm:rounded-xl max-h-[92vh] sm:max-h-[88vh] flex flex-col', widths[size],
+          'rounded-t-2xl sm:rounded-[20px] max-h-[92vh] sm:max-h-[88vh] flex flex-col', widths[size],
         )}
       >
-        <div className="flex items-start justify-between gap-4 px-5 py-4 border-b border-line shrink-0">
+        <div className="flex items-start justify-between gap-4 px-6 pt-5 pb-4 border-b border-line shrink-0">
           <div className="min-w-0">
-            <h2 className="text-base font-semibold text-ink">{title}</h2>
+            <h2 className="text-[17px] font-semibold tracking-[-0.015em] text-ink">{title}</h2>
             {subtitle && <p className="text-[13px] text-subtle mt-0.5">{subtitle}</p>}
           </div>
           <button onClick={onClose} aria-label="Close dialog"
@@ -429,8 +434,8 @@ export function Modal({ open, onClose, title, subtitle, children, footer, size =
             <X size={18} />
           </button>
         </div>
-        <div className="px-5 py-4 overflow-y-auto grow">{children}</div>
-        {footer && <div className="px-5 py-3.5 border-t border-line bg-sunken rounded-b-xl flex justify-end gap-2 shrink-0">{footer}</div>}
+        <div className="px-6 py-5 overflow-y-auto grow">{children}</div>
+        {footer && <div className="px-6 py-4 border-t border-line bg-raised rounded-b-[20px] flex justify-end gap-2 shrink-0">{footer}</div>}
       </div>
     </div>,
     document.body,
@@ -456,11 +461,11 @@ export function Drawer({ open, onClose, title, subtitle, children, footer, width
       <div className="absolute inset-0 bg-slate-950/45" onClick={onClose} aria-hidden />
       <aside
         role="dialog" aria-modal="true" aria-label={title}
-        className={cx('relative w-full bg-raised border-l border-line shadow-[var(--shadow-lg)] flex flex-col animate-in', width)}
+        className={cx('relative w-full bg-raised border-l border-line shadow-[var(--shadow-lg)] flex flex-col animate-in sm:rounded-l-[20px]', width)}
       >
-        <header className="flex items-start justify-between gap-4 px-5 py-4 border-b border-line shrink-0">
+        <header className="flex items-start justify-between gap-4 px-6 py-5 border-b border-line shrink-0">
           <div className="min-w-0">
-            <h2 className="text-base font-semibold text-ink truncate">{title}</h2>
+            <h2 className="text-[18px] font-semibold tracking-[-0.015em] text-ink truncate">{title}</h2>
             {subtitle && <div className="text-[13px] text-subtle mt-0.5">{subtitle}</div>}
           </div>
           <button onClick={onClose} aria-label="Close panel"
@@ -469,7 +474,7 @@ export function Drawer({ open, onClose, title, subtitle, children, footer, width
           </button>
         </header>
         <div className="grow overflow-y-auto">{children}</div>
-        {footer && <footer className="px-5 py-3.5 border-t border-line bg-sunken flex justify-end gap-2 shrink-0">{footer}</footer>}
+        {footer && <footer className="px-6 py-4 border-t border-line bg-raised flex justify-end gap-2 shrink-0 flex-wrap">{footer}</footer>}
       </aside>
     </div>,
     document.body,
@@ -482,24 +487,24 @@ export function Tabs({ tabs, active, onChange, className }: {
   active: string; onChange: (id: string) => void; className?: string;
 }) {
   return (
-    <div className={cx('flex gap-1 border-b border-line overflow-x-auto', className)} role="tablist">
+    <div className={cx('flex gap-1.5 overflow-x-auto pb-0.5', className)} role="tablist">
       {tabs.map((t) => (
         <button
           key={t.id} role="tab" aria-selected={active === t.id}
           onClick={() => onChange(t.id)}
           className={cx(
-            'relative flex items-center gap-2 px-3.5 py-2.5 text-sm font-medium whitespace-nowrap cursor-pointer',
-            'transition-colors duration-150 border-b-2 -mb-px',
+            'relative flex items-center gap-2 rounded-full px-4 py-2 text-[14px] font-medium whitespace-nowrap cursor-pointer',
+            'transition-colors duration-150',
             active === t.id
-              ? 'border-[var(--brand)] text-[var(--brand)]'
-              : 'border-transparent text-subtle hover:text-ink',
+              ? 'bg-brand-soft text-[var(--brand)]'
+              : 'text-subtle hover:bg-sunken hover:text-ink',
           )}
         >
           {t.icon}
           {t.label}
           {t.count != null && (
-            <span className={cx('rounded-full px-1.5 py-px text-[11px] tabular font-semibold',
-              active === t.id ? 'bg-brand-soft text-[var(--brand)]' : 'bg-sunken text-subtle')}>
+            <span className={cx('rounded-full px-1.5 py-px text-[11.5px] tabular font-semibold',
+              active === t.id ? 'bg-raised text-[var(--brand)]' : 'bg-sunken text-subtle')}>
               {t.count}
             </span>
           )}
@@ -515,10 +520,10 @@ export function EmptyState({ icon, title, message, action, compact }: {
 }) {
   return (
     <div className={cx('flex flex-col items-center justify-center text-center', compact ? 'py-8 px-4' : 'py-14 px-6')}>
-      <div className="mb-3 grid h-11 w-11 place-items-center rounded-full bg-sunken text-subtle">
+      <div className="mb-3 grid h-12 w-12 place-items-center rounded-full bg-brand-soft text-[var(--brand-vivid)]">
         {icon || <Inbox size={20} />}
       </div>
-      <h3 className="text-[15px] font-semibold text-ink">{title}</h3>
+      <h3 className="text-[16px] font-semibold tracking-[-0.01em] text-ink">{title}</h3>
       {message && <p className="mt-1 max-w-sm text-[13.5px] text-subtle leading-relaxed">{message}</p>}
       {action && <div className="mt-4">{action}</div>}
     </div>
@@ -555,22 +560,34 @@ export function TableSkeleton({ rows = 6, cols = 5 }: { rows?: number; cols?: nu
 }
 
 /* ============================================================== AVATAR */
+/** Every avatar is drawn a little larger than the size a screen asks for. */
+const AVATAR_SCALE = 1.15;
+
+/**
+ * A person: their uploaded photo, else a stock photo picked from their name
+ * (see lib/avatar.ts), else soft initials. The name is always shown beside it,
+ * so the picture is decorative to screen readers.
+ */
 export function Avatar({ name, url, size = 28, className }: {
   name?: string | null; url?: string | null; size?: number; className?: string;
 }) {
-  if (url) {
+  const s = Math.round(size * AVATAR_SCALE);
+  const stock = useStockPhoto(url ? null : name);
+  const photo = url || stock;
+  if (photo) {
     return (
-      <img src={url} alt="" width={size} height={size}
-        className={cx('rounded-full object-cover shrink-0', className)} style={{ width: size, height: size }} />
+      <img src={photo} alt="" width={s} height={s} loading="lazy" draggable={false}
+        className={cx('rounded-full object-cover shrink-0', className)} style={{ width: s, height: s, background: avatarTint(name) }} />
     );
   }
   return (
     <span
       aria-hidden
-      className={cx('inline-grid place-items-center rounded-full font-semibold text-white shrink-0', className)}
-      style={{ width: size, height: size, background: avatarColor(name), fontSize: size * 0.38 }}
+      className={cx('inline-grid place-items-center overflow-hidden rounded-full shrink-0 ring-1 ring-black/[0.04]', className)}
+      style={{ width: s, height: s, ...avatarStyle(name), fontSize: s * 0.36 }}
+      title={name || undefined}
     >
-      {initials(name)}
+      <span className="font-semibold">{initials(name)}</span>
     </span>
   );
 }
@@ -608,7 +625,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           role="status" aria-live="polite">
           {toasts.map((t) => (
             <div key={t.id}
-              className={cx('card px-4 py-3 shadow-[var(--shadow-lg)] animate-in border-l-4',
+              className={cx('card rounded-[14px] px-4 py-3 shadow-[var(--shadow-lg)] animate-in border-l-4',
                 t.tone === 'negative' ? 'border-l-[var(--negative)]'
                   : t.tone === 'positive' ? 'border-l-[var(--positive)]'
                     : t.tone === 'warning' ? 'border-l-[var(--warning)]' : 'border-l-[var(--brand)]')}>
@@ -638,15 +655,15 @@ export function PageHeader({ title, subtitle, actions, tabs }: {
   title: string; subtitle?: ReactNode; actions?: ReactNode; tabs?: ReactNode;
 }) {
   return (
-    <div className="mb-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className="mb-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-[21px] leading-7 font-semibold text-ink tracking-[-0.01em]">{title}</h1>
-          {subtitle && <div className="mt-0.5 text-[13.5px] text-subtle">{subtitle}</div>}
+          <h1 className="text-[26px] sm:text-[30px] leading-tight font-semibold text-ink tracking-[-0.025em]">{title}</h1>
+          {subtitle && <div className="mt-1 text-[14.5px] text-subtle">{subtitle}</div>}
         </div>
         {actions && <div className="flex items-center gap-2 flex-wrap no-print">{actions}</div>}
       </div>
-      {tabs && <div className="mt-3">{tabs}</div>}
+      {tabs && <div className="mt-4">{tabs}</div>}
     </div>
   );
 }
@@ -657,12 +674,12 @@ export function Meter({ value, max = 100, tone = 'brand', className, showLabel }
 }) {
   const pct = Math.max(0, Math.min(100, (value / (max || 1)) * 100));
   const colors: Record<string, string> = {
-    brand: 'var(--brand)', positive: 'var(--positive)', negative: 'var(--negative)',
+    brand: 'var(--brand-vivid)', positive: 'var(--positive)', negative: 'var(--negative)',
     warning: 'var(--warning)', accent: 'var(--accent-bg)', info: 'var(--info)', neutral: 'var(--ink-subtle)',
   };
   return (
     <div className={cx('flex items-center gap-2', className)}>
-      <div className="h-1.5 flex-1 rounded-full bg-sunken overflow-hidden min-w-[40px]"
+      <div className="h-2 flex-1 rounded-full bg-sunken overflow-hidden min-w-[40px]"
         role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
         <div className="h-full rounded-full transition-[width] duration-500"
           style={{ width: `${pct}%`, background: colors[tone] }} />

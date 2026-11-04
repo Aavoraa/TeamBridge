@@ -19,6 +19,9 @@ import { generateReviews, previousMonth } from './performance.js';
 import { marketingTick } from './marketing.js';
 import { todoTick } from './todoPlan.js';
 import { pruneChatEvents } from './chat.js';
+import { processPendingMeetings } from './meetingIntel.js';
+import { sendMeetingReminders } from './liveMeetings.js';
+import { sweepCaptures } from './meetingCapture.js';
 
 /**
  * In-process job runner.
@@ -638,6 +641,12 @@ const JOBS = [
   { key: 'close.monthly', atHourUtc: 4, onDayOfMonth: 1, fn: monthlyClose },
   { key: 'performance.monthly', atHourUtc: 4, onDayOfMonth: 1, fn: monthlyPerformance }, // 09:30 IST
   { key: 'chat.prune', atHourUtc: 5, fn: pruneChatEvents },
+  // Meeting recordings/transcripts nobody is watching: carry on processing.
+  { key: 'meetings.process', everyMin: 1, fn: processPendingMeetings },
+  // AI Meetings: "starting soon" ~15 minutes ahead, once per meeting.
+  { key: 'meetings.reminders', everyMin: 5, fn: sendMeetingReminders },
+  // Recordings whose webhook never arrived; transcripts that are ready to queue.
+  { key: 'meetings.capture', everyMin: 5, fn: sweepCaptures },
 ];
 
 /**
@@ -722,4 +731,6 @@ export const JOB_REGISTRY = {
   'marketing.tick': marketingClock,
   'todo.tick': todoClock,
   'chat.prune': pruneChatEvents,
+  'meetings.process': processPendingMeetings,
+  'meetings.reminders': sendMeetingReminders,
 };

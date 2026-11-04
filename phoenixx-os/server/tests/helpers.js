@@ -23,8 +23,18 @@ export function useTempDatabase() {
   process.env.JWT_ACCESS_SECRET = 'test-access-secret';
   process.env.JWT_REFRESH_SECRET = 'test-refresh-secret';
   process.env.NODE_ENV = 'test';
+  // Tests never reach real outside services, whatever keys a developer has in
+  // server/.env: blank them so dotenv (which never overrides a set variable)
+  // leaves them out. A test that wants one sets it before calling this.
+  for (const k of EXTERNAL_KEYS) if (process.env[k] === undefined) process.env[k] = '';
   return dir;
 }
+
+const EXTERNAL_KEYS = [
+  'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'OPENAI_API_KEY', 'GEMINI_API_KEY', 'TRANSCRIBE_PROVIDER',
+  'LIVEKIT_URL', 'LIVEKIT_API_KEY', 'LIVEKIT_API_SECRET',
+  'RECORDING_S3_BUCKET', 'RECORDING_S3_REGION', 'RECORDING_S3_ACCESS_KEY_ID', 'RECORDING_S3_SECRET_ACCESS_KEY', 'RECORDING_S3_ENDPOINT',
+];
 
 /** Minimal platform fixtures: one plan, so tenants can be provisioned. */
 export async function seedPlan(db) {

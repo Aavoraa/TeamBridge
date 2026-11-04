@@ -1,114 +1,109 @@
 @import 'tailwindcss';
 
 /* =====================================================================
-   Phoenixx OS design system — "data-dense dashboard".
-   The palette is taken from the Phoenixx IT mark: the wordmark vermillion
-   (#E15926) is brand-500, the phoenix's deep shadow is the 900/950 end, and
-   its highlight amber is the accent. Neutrals are warmed to sit with an ember
-   brand — a cool slate grey fights orange and reads dirty next to it.
-   Ember carries structure and data; amber is reserved for the single most
-   important action or warning on a screen, so it never competes with itself.
-   Every colour is a token defined in both themes; nothing is defined only
-   inside a dark-mode block, and every foreground/background pair below is
-   AA (>= 4.5:1) in both themes.
+   TeamBridge design system.
+   Calm, airy, light: a cool off-white page, white cards with soft 16px
+   corners and a hairline border, Inter throughout, and one green accent
+   for what is active or positive. Orange and blue are supporting hues for
+   charts and status, never competing with the green.
+   Every colour is a token defined in both themes, and every text/background
+   pair below is AA (>= 4.5:1) in both.
    ===================================================================== */
 
 @theme {
-  --font-sans: 'Fira Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-mono: 'Fira Code', ui-monospace, 'SF Mono', Menlo, monospace;
-  /* The mark's wordmark is set in a serif; this is the closest face that is
-     already on every machine, so the lockup needs no extra web font. */
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
   --font-serif: Georgia, 'Times New Roman', Times, serif;
 
-  --color-brand-50: #fef4f1;
-  --color-brand-100: #fde6dd;
-  --color-brand-200: #fac9b7;
-  --color-brand-300: #f5a080;
-  --color-brand-400: #ee7a4f;
-  --color-brand-500: #e15926;   /* the mark's vermillion, sampled from logo.svg */
-  --color-brand-600: #c34718;
-  --color-brand-700: #a53b12;
-  --color-brand-800: #883111;
-  --color-brand-900: #6f2a11;
-  --color-brand-950: #401708;
+  --color-brand-50: #eef8f2;
+  --color-brand-100: #dcf0e3;
+  --color-brand-200: #b8e1c7;
+  --color-brand-300: #86cba0;
+  --color-brand-400: #4fb077;
+  --color-brand-500: #22a35a;   /* the green of the icons and progress */
+  --color-brand-600: #1a8a4b;
+  --color-brand-700: #17703f;
+  --color-brand-800: #155a35;
+  --color-brand-900: #124a2d;
+  --color-brand-950: #082a18;
 
-  --color-accent-50: #fff8eb;
-  --color-accent-100: #fdecc8;
+  --color-accent-50: #fff7ed;
+  --color-accent-100: #ffedd5;
   --color-accent-400: #fbbf24;
-  --color-accent-500: #ed8c00;  /* the phoenix's highlight amber */
-  --color-accent-600: #c97400;
-  --color-accent-700: #a85b08;
+  --color-accent-500: #f59e0b;  /* chart orange */
+  --color-accent-600: #d97706;
+  --color-accent-700: #b45309;
 
-  --radius-card: 0.625rem;
+  --radius-card: 1rem;
 }
 
 /* ------------------------------------------------------------ semantics */
 :root {
-  --surface: #f9f7f5;          /* page background — warm, not slate */
-  --surface-raised: #ffffff;   /* cards, panels */
-  --surface-sunken: #f3efec;   /* table headers, wells */
-  --surface-hover: #fbf8f6;
-  --border: #e9e2dc;
-  --border-strong: #d6cac1;
-  --ink: #1c1410;              /* primary text  — 17.0:1 on surface */
-  --ink-muted: #57453c;        /* secondary     —  8.5:1 */
-  --ink-subtle: #7a6559;       /* tertiary      —  5.1:1 */
+  --surface: #f7f8fa;          /* page background */
+  --surface-raised: #ffffff;   /* cards, sidebar, panels */
+  --surface-sunken: #f2f4f7;   /* wells, search pill, table heads */
+  --surface-hover: #f7f8fa;
+  --border: #eceef2;
+  --border-strong: #dde1e7;
+  --ink: #111318;              /* headings and values */
+  --ink-muted: #3f4652;        /* body text */
+  --ink-subtle: #6b7280;       /* labels — 4.8:1 on white */
   --ink-inverse: #ffffff;
-  --brand: #c34718;            /* darkened from the mark for AA as text (4.6:1) */
-  --brand-vivid: #e15926;      /* the mark's own orange — decoration and fills only */
-  --brand-contrast: #ffffff;   /* text that sits on a --brand fill (5.0:1) */
-  --brand-soft: #fef4f1;
-  --accent: #a85b08;           /* amber, darkened for AA text contrast */
-  --accent-bg: #ed8c00;        /* amber for fills; contrast comes from the text on top */
-  --accent-contrast: #2a1806;  /* text that sits on an --accent-bg fill (6.8:1) */
-  --accent-soft: #fff8eb;
-  --positive: #166534;
-  --positive-soft: #f0fdf4;
-  --negative: #be123c;         /* rose, not red: a red negative is unreadable beside an ember brand */
-  --negative-soft: #fff1f3;
+  --brand: #17703f;            /* green as text and for active items — 6.2:1 */
+  --brand-vivid: #22a35a;      /* the brighter green, for icons and fills */
+  --brand-contrast: #ffffff;   /* text on a --brand fill */
+  --brand-soft: #eaf6ef;       /* active nav, selected pills */
+  --accent: #b45309;           /* orange as text */
+  --accent-bg: #f59e0b;
+  --accent-contrast: #2a1806;
+  --accent-soft: #fff4e6;
+  --positive: #15803d;
+  --positive-soft: #eaf6ef;
+  --negative: #dc2626;
+  --negative-soft: #fdecec;
   --negative-contrast: #ffffff;
-  --warning: #92610a;
-  --warning-soft: #fefaec;
-  --info: #1d4ed8;
-  --info-soft: #eff6ff;
-  --ring: #e15926;
-  --shadow-sm: 0 1px 2px 0 rgb(40 22 12 / 0.06);
-  --shadow-md: 0 1px 3px 0 rgb(40 22 12 / 0.09), 0 1px 2px -1px rgb(40 22 12 / 0.06);
-  --shadow-lg: 0 10px 24px -6px rgb(40 22 12 / 0.14), 0 4px 8px -4px rgb(40 22 12 / 0.07);
+  --warning: #b45309;
+  --warning-soft: #fff4e6;
+  --info: #2563eb;
+  --info-soft: #eaf1fe;
+  --ring: #22a35a;
+  --shadow-sm: 0 1px 2px 0 rgb(16 24 40 / 0.03);
+  --shadow-md: 0 2px 8px -2px rgb(16 24 40 / 0.08), 0 1px 2px 0 rgb(16 24 40 / 0.04);
+  --shadow-lg: 0 16px 36px -10px rgb(16 24 40 / 0.18), 0 4px 10px -4px rgb(16 24 40 / 0.08);
 }
 
 :root.dark {
-  --surface: #12100f;
-  --surface-raised: #1c1917;
-  --surface-sunken: #241f1c;
-  --surface-hover: #241f1c;
-  --border: #332c28;
-  --border-strong: #4a403a;
-  --ink: #f5efea;
-  --ink-muted: #c4b5aa;
-  --ink-subtle: #9c8b7e;
-  --ink-inverse: #12100f;
-  --brand: #ff8a5b;            /* lifted for AA as text on a dark surface (8.2:1) */
-  --brand-vivid: #ff8a5b;
-  --brand-contrast: #2a0f06;   /* the fill is light here, so its text goes dark (7.7:1) */
-  --brand-soft: #2b1710;
+  --surface: #0e1014;
+  --surface-raised: #161a20;
+  --surface-sunken: #1d2229;
+  --surface-hover: #1b2027;
+  --border: #252a32;
+  --border-strong: #343b45;
+  --ink: #f3f5f7;
+  --ink-muted: #c7cdd5;
+  --ink-subtle: #929aa6;
+  --ink-inverse: #0e1014;
+  --brand: #4ccf85;            /* 8.4:1 on the dark card */
+  --brand-vivid: #4ccf85;
+  --brand-contrast: #06210f;
+  --brand-soft: #12271b;
   --accent: #fbbf24;
-  --accent-bg: #ed8c00;
+  --accent-bg: #f59e0b;
   --accent-contrast: #2a1806;
-  --accent-soft: #2a1d08;
+  --accent-soft: #2a1f0b;
   --positive: #4ade80;
-  --positive-soft: #0f2418;
-  --negative: #fda4af;
-  --negative-soft: #2c1218;
-  --negative-contrast: #2c1218;
+  --positive-soft: #10261a;
+  --negative: #f87171;
+  --negative-soft: #2c1416;
+  --negative-contrast: #2c1416;
   --warning: #fbbf24;
-  --warning-soft: #261b08;
-  --info: #93c5fd;
-  --info-soft: #17233c;
-  --ring: #ff8a5b;
-  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.4);
-  --shadow-md: 0 1px 3px 0 rgb(0 0 0 / 0.5);
-  --shadow-lg: 0 12px 28px -8px rgb(0 0 0 / 0.6);
+  --warning-soft: #2a1f0b;
+  --info: #7aa7ff;
+  --info-soft: #14203a;
+  --ring: #4ccf85;
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.35);
+  --shadow-md: 0 2px 8px -2px rgb(0 0 0 / 0.5);
+  --shadow-lg: 0 16px 36px -10px rgb(0 0 0 / 0.65);
 }
 
 @theme inline {
@@ -147,6 +142,8 @@ body {
   font-family: var(--font-sans);
   font-size: 15px;              /* NFR: >= 16px effective on mobile via the bump below */
   line-height: 1.55;
+  font-feature-settings: 'cv11';   /* Inter: single-storey a, as in the design */
+  letter-spacing: -0.006em;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -166,15 +163,15 @@ body {
   border-radius: 4px;
 }
 
-::selection { background: var(--brand); color: #fff; }
+::selection { background: color-mix(in srgb, var(--brand-vivid) 30%, transparent); color: var(--ink); }
 
 /* ------------------------------------------------------------ scrollbar */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
   background: var(--border-strong);
-  border-radius: 6px;
-  border: 2px solid var(--surface);
+  border-radius: 999px;
+  border: 3px solid var(--surface);
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--ink-subtle); }
 
@@ -186,11 +183,12 @@ body {
   box-shadow: var(--shadow-sm);
 }
 
+/* A small label above a value or a list: sentence case, quiet grey, as in the design. */
 @utility label-cap {
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.055em;
-  text-transform: uppercase;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--ink-subtle);
 }
 
@@ -212,7 +210,7 @@ body {
   background: linear-gradient(90deg, var(--surface-sunken) 25%, var(--border) 50%, var(--surface-sunken) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.4s ease-in-out infinite;
-  border-radius: 5px;
+  border-radius: 10px;
 }
 
 /* Respect the OS setting — animation is decoration, never information. */
@@ -248,7 +246,7 @@ body {
   scroll-snap-align: start;
   background: var(--surface-sunken);
   border: 1px solid var(--border);
-  border-radius: 0.75rem;
+  border-radius: 1rem;
   transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 .board-col.is-drop-target {
@@ -279,7 +277,7 @@ body {
   position: relative;
   background: var(--surface-raised);
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
+  border-radius: 0.75rem;
   box-shadow: var(--shadow-sm);
   padding: 0.5rem 0.625rem 0.625rem;
   cursor: pointer;
@@ -360,7 +358,8 @@ body.is-dragging .board-col.is-drop-target [data-empty] { display: none; }
 }
 
 /* Recharts: inherit our tokens rather than its defaults. */
-.recharts-cartesian-axis-tick text { fill: var(--ink-subtle); font-size: 11px; }
+.recharts-cartesian-axis-tick text { fill: var(--ink-subtle); font-size: 12px; }
+.recharts-default-tooltip { border-radius: 12px !important; border: 1px solid var(--border) !important; background: var(--surface-raised) !important; box-shadow: var(--shadow-md); }
 .recharts-cartesian-grid line { stroke: var(--border); }
 .recharts-tooltip-wrapper { outline: none !important; }
 
@@ -409,3 +408,34 @@ html.platform-ios textarea,
 html.platform-ios select {
   font-size: max(16px, 1em);
 }
+
+/* ---------------------------------------------------------------- meeting room
+   LiveKit's default theme, in Phoenixx colours, plus the room's own controls. */
+.phx-room {
+  --lk-bg: #0e1014;
+  --lk-bg2: #161a20;
+  --lk-bg3: #1d2229;
+  --lk-accent-bg: #4ccf85;
+  --lk-accent-fg: #06210f;
+  --lk-border-radius: 12px;
+  font-family: inherit;
+}
+.phx-room .lk-participant-tile { border-radius: 12px; background: #1a1f27; transition: box-shadow 150ms ease; }
+.phx-room .lk-participant-tile[data-lk-speaking='true'] { box-shadow: 0 0 0 3px #4ccf85; }
+.phx-room .lk-participant-metadata { font-size: 12.5px; }
+.phx-ctl {
+  display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 16px; border-radius: 999px;
+  background: rgba(255,255,255,0.08); color: #fff; font-size: 13.5px; font-weight: 500; border: 0; cursor: pointer;
+  transition: background 150ms ease;
+}
+.phx-ctl:hover { background: rgba(255,255,255,0.16); }
+.phx-ctl[data-lk-enabled='false'] { background: #3a1d1d; color: #ffb3b3; }
+.phx-ctl-on { background: rgba(76,207,133,0.22); color: #c9f2db; }
+.phx-leave { background: #d93838; }
+.phx-leave:hover { background: #e54b4b; }
+.phx-quality { width: 16px; height: 16px; }
+.phx-startaudio { position: fixed; bottom: 88px; left: 50%; transform: translateX(-50%); }
+.phx-prejoin .lk-prejoin { width: 100%; max-width: none; padding: 0; }
+.phx-ctl-hand { background: rgba(251,191,36,0.25); color: #fde68a; }
+.phx-room .lk-carousel { gap: 8px; }
+.phx-room .lk-focus-layout, .phx-room .lk-participant-tile video { object-fit: contain; }

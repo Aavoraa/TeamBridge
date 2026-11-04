@@ -106,7 +106,7 @@ export default function Recover() {
         <div className="max-w-md mx-auto px-5 h-14 flex items-center">
           <Link to="/login" className="flex items-center gap-2.5">
             <Logo size={32} />
-            <span className="font-semibold text-ink text-[15px]">Phoenixx OS</span>
+            <span className="font-semibold text-ink text-[16px] tracking-[-0.02em]">TeamBridge</span>
           </Link>
         </div>
       </header>

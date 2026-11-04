@@ -15,6 +15,10 @@ export const MODULES = [
   'reimbursements', 'reimbursement_finance',
   'reports', 'dashboard',
   'settings', 'users', 'billing', 'audit', 'platform',
+  // AI Meeting Intelligence: upload recordings/transcripts and approve the
+  // tasks extracted from them. Not on the employee templates: meetings can be
+  // confidential, so only roles that hand out work see it unless granted.
+  'meeting_intelligence',
 ];
 
 export const ACTIONS = ['view', 'create', 'edit', 'approve', 'delete', 'export'];
@@ -64,6 +68,7 @@ export const ROLE_TEMPLATES = {
     billing: [],
     audit: RO,
     platform: [],
+    meeting_intelligence: ['view', 'create', 'approve'],
   },
 
   employee: {
@@ -97,6 +102,7 @@ export const ROLE_TEMPLATES = {
     billing: [],
     audit: [],
     platform: [],
+    meeting_intelligence: [],
   },
 
   finance: {
@@ -128,6 +134,7 @@ export const ROLE_TEMPLATES = {
     billing: [...RO, 'edit'],
     audit: RO,
     platform: [],
+    meeting_intelligence: [],
   },
 
   hr: {
@@ -158,6 +165,7 @@ export const ROLE_TEMPLATES = {
     billing: [],
     audit: RO,
     platform: [],
+    meeting_intelligence: [],
   },
 
   // Portal user - read-only on their own reports/proposals/invoices (PRD 2.2)
@@ -169,7 +177,7 @@ export const ROLE_TEMPLATES = {
     invoices: RO, costs: [], profitability: [],
     reimbursements: [], reimbursement_finance: [],
     reports: RO, dashboard: [], settings: [], users: [], billing: [], audit: [],
-    platform: [],
+    platform: [], meeting_intelligence: [],
   },
 };
 

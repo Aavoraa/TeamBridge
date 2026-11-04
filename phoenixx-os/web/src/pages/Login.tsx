@@ -49,43 +49,36 @@ export default function Login() {
     <div className="min-h-screen bg-surface lg:grid lg:grid-cols-[1.35fr_minmax(430px,1fr)]">
 
       {/* ------------------------------------------------------- brand side */}
-      {/* One dark field, one warm glow, one mark. Everything else is type. */}
-      <aside
-        className="relative hidden overflow-hidden px-14 py-14 text-white lg:flex lg:flex-col lg:justify-between"
-        style={{ background: '#14100d' }}
-      >
+      {/* A light, airy panel in the app's own palette: a soft green wash, the mark, and type. */}
+      <aside className="relative hidden overflow-hidden px-14 py-14 lg:flex lg:flex-col lg:justify-between bg-surface border-r border-line">
         <div
           aria-hidden
           className="absolute inset-0"
-          style={{ background: 'radial-gradient(circle at 78% 82%, rgba(226,89,38,0.26), transparent 55%)' }}
+          style={{ background: 'radial-gradient(circle at 85% 88%, color-mix(in srgb, var(--brand-vivid) 16%, transparent), transparent 55%)' }}
         />
         {/* The mark sits low and quiet, bleeding off the corner: present as
             texture, never competing with the headline for attention. */}
-        <div aria-hidden className="pointer-events-none absolute -bottom-16 -right-12 select-none opacity-[0.16]">
+        <div aria-hidden className="pointer-events-none absolute -bottom-20 -right-16 select-none opacity-[0.09]">
           <Logo size={420} alt="" />
         </div>
 
-        <Wordmark size={46} variant="onDark" className="relative" />
+        <Wordmark size={40} className="relative" />
 
         <div className="relative max-w-[30rem]">
-          <h1 className="text-[36px] font-bold leading-[1.2] tracking-[-0.02em]">
+          <h1 className="text-[38px] font-semibold leading-[1.15] tracking-[-0.03em] text-ink">
             Run the whole agency
-            <span className="block text-[var(--brand-vivid)]">from one place.</span>
+            <span className="block text-[var(--brand)]">from one place.</span>
           </h1>
-          <p className="mt-5 text-[15px] leading-[1.65] text-white/60">
-            Phoenixx OS replaces the spreadsheets, chat threads and paperwork your
+          <p className="mt-5 text-[15.5px] leading-[1.65] text-muted">
+            TeamBridge replaces the spreadsheets, chat threads and paperwork your
             team is holding together by hand.
           </p>
 
           <ul className="mt-8 space-y-3.5">
             {POINTS.map((p) => (
-              <li key={p} className="flex items-start gap-3 text-[14.5px] leading-relaxed text-white/80">
-                <span
-                  aria-hidden
-                  className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full"
-                  style={{ background: 'rgba(226,89,38,0.16)' }}
-                >
-                  <Check size={12} strokeWidth={2.5} className="text-[var(--brand-vivid)]" />
+              <li key={p} className="flex items-start gap-3 text-[15px] leading-relaxed text-ink">
+                <span aria-hidden className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-brand-soft">
+                  <Check size={13} strokeWidth={2.6} className="text-[var(--brand-vivid)]" />
                 </span>
                 {p}
               </li>
@@ -93,8 +86,8 @@ export default function Login() {
           </ul>
         </div>
 
-        <p className="relative text-[13px] text-white/40">
-          Phoenixx IT · Coimbatore · Beyond Technology
+        <p className="relative text-[13px] text-subtle">
+          TeamBridge · Meetings, tasks, projects and clients in one place
         </p>
       </aside>
 
@@ -176,7 +169,7 @@ export default function Login() {
           </form>
 
           <p className="mt-10 border-t border-line pt-6 text-center text-[14px] text-muted">
-            New to Phoenixx?{' '}
+            New to TeamBridge?{' '}
             <Link to="/signup" className="font-semibold text-[var(--brand)] hover:underline">
               Start a 14-day trial
             </Link>

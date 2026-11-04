@@ -340,4 +340,150 @@ router.get('/home', async (req, res) => {
   });
 });
 
+// ------------------------------------------------------- overview analytics
+/**
+ * The Dashboard's "Overview Analytics", chart and sales funnel. Each block is
+ * only computed for people who may see what it is built from (invoices for
+ * revenue, proposals for conversion, the CRM for leads and the funnel); the
+ * rest come back null and the page leaves them out.
+ *
+ * Figures compare the last 30 days with the 30 before. Money is in the
+ * workspace currency, in minor units, converted at each invoice's rate.
+ */
+const RANGES = {
+  '1M': { buckets: 30, unit: 'day' },
+  '3M': { buckets: 13, unit: 'week' },
+  '6M': { buckets: 6, unit: 'month' },
+  '1Y': { buckets: 12, unit: 'month' },
+};
+const DAY = 86_400_000;
+
+function bucketStarts(range, now = new Date()) {
+  const { buckets, unit } = RANGES[range];
+  const starts = [];
+  if (unit === 'month') {
+    const base = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    for (let i = buckets * 2 - 1; i >= 0; i--) starts.push(new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() - i, 1)));
+    starts.push(new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + 1, 1)));
+  } else {
+    const step = unit === 'week' ? 7 * DAY : DAY;
+    const end = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) + DAY;
+    for (let i = buckets * 2; i >= 0; i--) starts.push(new Date(end - i * step));
+  }
+  return starts; // 2N+1 edges: N previous-period buckets, then N current
+}
+
+router.get('/overview-analytics', async (req, res) => {
+  const { tenantId } = req.auth;
+  const range = RANGES[req.query.range] ? String(req.query.range) : '1M';
+  const now = Date.now();
+  const w0 = new Date(now - 30 * DAY).toISOString();
+  const wPrev = new Date(now - 60 * DAY).toISOString();
+  const tenant = await get('SELECT currency FROM tenants WHERE id = ?', [tenantId]);
+  const change = (cur, prev) => (prev ? Math.round(((cur - prev) / prev) * 1000) / 10 : null);
+  const out = { currency: tenant?.currency || 'INR', range, revenue: null, conversion: null, leads: null, pipeline: null, funnel: null, series: null };
+
+  if (await can(req.auth, 'invoices', 'view')) {
+    const paid = async (from, to) => Number((await get(
+      `SELECT COALESCE(SUM(p.amount_minor * COALESCE(i.exchange_rate, 1)), 0) AS v FROM payments p JOIN invoices i ON i.id = p.invoice_id
+        WHERE p.tenant_id = ? AND p.deleted_at IS NULL AND p.paid_at >= ? AND p.paid_at < ?`, [tenantId, from, to],
+    )).v);
+    const cur = await paid(w0, new Date(now + DAY).toISOString());
+    const prev = await paid(wPrev, w0);
+    out.revenue = { value: Math.round(cur), previous: Math.round(prev), change: change(cur, prev) };
+
+    // The chart: this period against the one before, bucket by bucket.
+    const edges = bucketStarts(range, new Date(now));
+    const rows = await all(
+      `SELECT p.paid_at, p.amount_minor * COALESCE(i.exchange_rate, 1) AS v FROM payments p JOIN invoices i ON i.id = p.invoice_id
+        WHERE p.tenant_id = ? AND p.deleted_at IS NULL AND p.paid_at >= ? AND p.paid_at < ?`,
+      [tenantId, edges[0].toISOString(), edges.at(-1).toISOString()],
+    );
+    const n = RANGES[range].buckets;
+    const sums = new Array(n * 2).fill(0);
+    for (const r of rows) {
+      const t = Date.parse(r.paid_at);
+      let k = 0;
+      while (k < sums.length - 1 && t >= edges[k + 1].getTime()) k++;
+      sums[k] += Number(r.v);
+    }
+    out.series = {
+      unit: RANGES[range].unit,
+      points: Array.from({ length: n }, (_, i) => ({
+        start: edges[n + i].toISOString(), current: Math.round(sums[n + i]), previous: Math.round(sums[i]),
+      })),
+      total: Math.round(sums.slice(n).reduce((a, v) => a + v, 0)),
+      previous_total: Math.round(sums.slice(0, n).reduce((a, v) => a + v, 0)),
+    };
+    out.series.change = change(out.series.total, out.series.previous_total);
+  }
+
+  if (await can(req.auth, 'proposals', 'view')) {
+    const rate = async (from, to) => {
+      const r = await get(
+        `SELECT SUM(CASE WHEN sent_at >= ? AND sent_at < ? THEN 1 ELSE 0 END) AS sent,
+                SUM(CASE WHEN accepted_at >= ? AND accepted_at < ? THEN 1 ELSE 0 END) AS won
+           FROM proposals WHERE tenant_id = ? AND deleted_at IS NULL`, [from, to, from, to, tenantId],
+      );
+      const sent = Number(r?.sent || 0);
+      return sent ? Math.min(100, Math.round((Number(r.won || 0) / sent) * 1000) / 10) : null;
+    };
+    const cur = await rate(w0, new Date(now + DAY).toISOString());
+    const prev = await rate(wPrev, w0);
+    out.conversion = { value: cur, previous: prev, change: cur != null && prev != null ? Math.round((cur - prev) * 10) / 10 : null };
+  }
+
+  if (await can(req.auth, 'crm', 'view')) {
+    const openLeads = await get(
+      `SELECT COUNT(*) AS n, COALESCE(SUM(deal_value_minor), 0) AS v FROM clients WHERE tenant_id = ? AND deleted_at IS NULL AND status = 'lead'`, [tenantId],
+    );
+    const created = async (from, to) => Number((await get(
+      'SELECT COUNT(*) AS n FROM clients WHERE tenant_id = ? AND deleted_at IS NULL AND created_at >= ? AND created_at < ?', [tenantId, from, to],
+    )).n);
+    const newCur = await created(w0, new Date(now + DAY).toISOString());
+    const newPrev = await created(wPrev, w0);
+    out.leads = { value: Number(openLeads.n), new_this_period: newCur, new_previous: newPrev, change: change(newCur, newPrev) };
+    out.pipeline = { value: Number(openLeads.v), deals: Number(openLeads.n) };
+
+    // The funnel: everyone who became a lead in the last year, counted at the
+    // furthest step they reached - so each bar contains the ones below it.
+    const proposalSort = (await get(`SELECT sort FROM pipeline_stages WHERE tenant_id = ? AND code = 'proposal' AND deleted_at IS NULL`, [tenantId]))?.sort;
+    const firstSort = (await get('SELECT MIN(sort) AS s FROM pipeline_stages WHERE tenant_id = ? AND deleted_at IS NULL', [tenantId]))?.s ?? 0;
+    const people = await all(
+      `SELECT c.id, c.status, s.sort, s.is_won, s.is_lost,
+              EXISTS (SELECT 1 FROM proposals p WHERE p.client_id = c.id AND p.deleted_at IS NULL AND p.sent_at IS NOT NULL) AS sent,
+              EXISTS (SELECT 1 FROM proposals p WHERE p.client_id = c.id AND p.deleted_at IS NULL
+                        AND (p.first_viewed_at IS NOT NULL OR p.status IN ('accepted', 'rejected'))) AS negotiated
+         FROM clients c LEFT JOIN pipeline_stages s ON s.id = c.stage_id
+        WHERE c.tenant_id = ? AND c.deleted_at IS NULL AND c.created_at >= ?`,
+      [tenantId, new Date(now - 365 * DAY).toISOString()],
+    );
+    const yes = (v) => v === true || Number(v) === 1;
+    const steps = { total: 0, qualified: 0, proposals: 0, negotiations: 0, closed: 0 };
+    for (const c of people) {
+      const won = ['active', 'churned'].includes(c.status) || yes(c.is_won);
+      const sort = c.sort == null ? null : Number(c.sort);
+      const negotiation = won || yes(c.negotiated) || (proposalSort != null && sort != null && sort > proposalSort && !yes(c.is_lost));
+      const proposal = negotiation || yes(c.sent) || (proposalSort != null && sort != null && sort >= proposalSort);
+      const qualified = proposal || (sort != null && sort > firstSort);
+      steps.total++;
+      if (qualified) steps.qualified++;
+      if (proposal) steps.proposals++;
+      if (negotiation) steps.negotiations++;
+      if (won) steps.closed++;
+    }
+    out.funnel = {
+      steps: [
+        { key: 'total', label: 'Total leads', value: steps.total },
+        { key: 'qualified', label: 'Qualified leads', value: steps.qualified },
+        { key: 'proposals', label: 'Proposals sent', value: steps.proposals },
+        { key: 'negotiations', label: 'Negotiations', value: steps.negotiations },
+        { key: 'closed', label: 'Closed deals', value: steps.closed },
+      ],
+      conversion: steps.total ? Math.round((steps.closed / steps.total) * 1000) / 10 : null,
+    };
+  }
+  return ok(res, out);
+});
+
 export { router as dashboardRouter };

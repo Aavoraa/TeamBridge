@@ -5,7 +5,7 @@
   "outputDirectory": "web/dist",
   "functions": {
     "api/index.mjs": {
-      "maxDuration": 60,
+      "maxDuration": 300,
       "includeFiles": "server/src/db/schema.sql"
     }
   },

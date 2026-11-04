@@ -21,7 +21,7 @@ export const config = {
   env: process.env.NODE_ENV || 'development',
   port: Number(process.env.PORT || 4010),
   apiBaseUrl: process.env.API_BASE_URL || publicOrigin || `http://localhost:${process.env.PORT || 4010}`,
-  webBaseUrl: publicOrigin || 'http://localhost:5173',
+  webBaseUrl: publicOrigin || 'http://localhost:5174',
 
   /**
    * Origins allowed to call the API in production.
@@ -36,7 +36,7 @@ export const config = {
    * hosted web front end.
    */
   corsOrigins: [
-    publicOrigin || 'http://localhost:5173',
+    publicOrigin || 'http://localhost:5174',
     'capacitor://localhost',
     'http://localhost',
     'https://localhost',
@@ -63,6 +63,33 @@ export const config = {
 
   // Fill an empty database with the demo workspace on start (`npm start` only).
   seedOnBoot: bool(process.env.SEED_ON_BOOT, false),
+
+  /**
+   * LiveKit (AI Meetings video). LIVEKIT_URL is the project's wss:// address;
+   * the key and secret sign join tokens and verify webhooks and never leave
+   * the server. Unset = video meetings show "not configured" instead of failing.
+   */
+  livekit: {
+    url: process.env.LIVEKIT_URL || '',
+    apiKey: process.env.LIVEKIT_API_KEY || '',
+    apiSecret: process.env.LIVEKIT_API_SECRET || '',
+  },
+
+  /**
+   * Where meeting recordings go (AWS S3, or any S3-compatible store with an
+   * endpoint). LiveKit Egress uploads straight here; the server reads audio
+   * back for transcription and hands out short-lived playback links.
+   * Unset = meetings run without recording.
+   */
+  recordingStorage: {
+    bucket: process.env.RECORDING_S3_BUCKET || '',
+    region: process.env.RECORDING_S3_REGION || '',
+    accessKeyId: process.env.RECORDING_S3_ACCESS_KEY_ID || '',
+    secretAccessKey: process.env.RECORDING_S3_SECRET_ACCESS_KEY || '',
+    endpoint: process.env.RECORDING_S3_ENDPOINT || '',
+    forcePathStyle: bool(process.env.RECORDING_S3_FORCE_PATH_STYLE, false),
+    prefix: `${(process.env.RECORDING_S3_PREFIX || 'meetings').replace(/^\/+|\/+$/g, '')}/`,
+  },
 
   providers: {
     whatsapp: process.env.WHATSAPP_PROVIDER || 'log',

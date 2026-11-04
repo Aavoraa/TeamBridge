@@ -14,7 +14,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Megaphone, MessagesSquare, Search, Send, Users } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
-import { avatarColor, initials, relative, time as fmtTime } from '../../lib/format';
+import { relative, time as fmtTime } from '../../lib/format';
+import { useStockPhoto, avatarTint } from '../../lib/avatar';
 import { useToast } from '../../components/ui';
 import { Empty, ErrorNote, List, Loading, Row, Screen, inputClass } from '../ui';
 
@@ -152,11 +153,8 @@ function ChannelAvatar({ channel }: { channel: any }) {
     );
   }
   return (
-    <span
-      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold text-white"
-      style={{ background: avatarColor(name) }}
-    >
-      {initials(name)}
+    <span className="block h-11 w-11 shrink-0 overflow-hidden rounded-full" style={{ background: avatarTint(name) }}>
+      <Drawn name={name} />
     </span>
   );
 }
@@ -307,4 +305,12 @@ function Bubble({ message, mine }: { message: any; mine: boolean }) {
       </div>
     </div>
   );
+}
+
+/** A stock photo from the pool, or soft initials when there is none. */
+function Drawn({ name }: { name?: string | null }) {
+  const src = useStockPhoto(name);
+  return src
+    ? <img src={src} alt="" className="h-full w-full object-cover" draggable={false} loading="lazy" />
+    : <span className="grid h-full w-full place-items-center text-[13px] font-semibold text-[var(--ink-muted)]">{(name || '?').split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase()}</span>;
 }

@@ -15,6 +15,9 @@ import Home from './pages/Home';
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const ActionItems = lazy(() => import('./pages/ActionItems'));
 const Meetings = lazy(() => import('./pages/Meetings'));
+const MeetingIntel = lazy(() => import('./pages/MeetingIntel'));
+const AiMeetings = lazy(() => import('./pages/AiMeetings'));
+const MeetingRoom = lazy(() => import('./pages/MeetingRoom'));
 const Chat = lazy(() => import('./pages/Chat'));
 const Deadlines = lazy(() => import('./pages/Deadlines'));
 const CRM = lazy(() => import('./pages/CRM'));
@@ -86,6 +89,13 @@ export default function App() {
         </RequireAuth>
       )} />
 
+      {/* Live meeting room: full screen, outside the CRM shell, so video gets the space. */}
+      <Route path="/ai-meetings/room/:id" element={(
+        <RequireAuth>
+          <Suspense fallback={<FullPageSpinner />}><MeetingRoom /></Suspense>
+        </RequireAuth>
+      )} />
+
       {/* ----------------------------------------------------- protected */}
       <Route element={<RequireAuth><Layout /></RequireAuth>}>
         {/* Inside the installed app the mobile shell is the whole product. */}
@@ -95,6 +105,15 @@ export default function App() {
         <Route path="action-items/:id" element={<Suspense fallback={<FullPageSpinner />}><ActionItems /></Suspense>} />
         <Route path="meetings" element={<Suspense fallback={<FullPageSpinner />}><Meetings /></Suspense>} />
         <Route path="meetings/:id" element={<Suspense fallback={<FullPageSpinner />}><Meetings /></Suspense>} />
+        <Route path="ai-meetings" element={<Suspense fallback={<FullPageSpinner />}><AiMeetings /></Suspense>} />
+        <Route path="ai-meetings/schedule" element={<Suspense fallback={<FullPageSpinner />}><AiMeetings /></Suspense>} />
+        <Route path="ai-meetings/join" element={<Suspense fallback={<FullPageSpinner />}><AiMeetings /></Suspense>} />
+        <Route path="ai-meetings/upcoming" element={<Suspense fallback={<FullPageSpinner />}><AiMeetings /></Suspense>} />
+        <Route path="ai-meetings/history" element={<Suspense fallback={<FullPageSpinner />}><AiMeetings /></Suspense>} />
+        <Route path="ai-meetings/m/:id" element={<Suspense fallback={<FullPageSpinner />}><AiMeetings /></Suspense>} />
+        <Route path="ai-meetings/j/:token" element={<Suspense fallback={<FullPageSpinner />}><AiMeetings /></Suspense>} />
+        <Route path="meeting-intel" element={<Suspense fallback={<FullPageSpinner />}><MeetingIntel /></Suspense>} />
+        <Route path="meeting-intel/:id" element={<Suspense fallback={<FullPageSpinner />}><MeetingIntel /></Suspense>} />
         <Route path="deadlines" element={<Suspense fallback={<FullPageSpinner />}><Deadlines /></Suspense>} />
         <Route path="chat" element={<Suspense fallback={<FullPageSpinner />}><Chat /></Suspense>} />
         <Route path="clients" element={<Suspense fallback={<FullPageSpinner />}><Clients /></Suspense>} />

@@ -85,7 +85,7 @@ export default function Signup() {
         <div className="max-w-3xl mx-auto px-5 h-14 flex items-center justify-between">
           <Link to="/login" className="flex items-center gap-2.5">
             <Logo size={32} />
-            <span className="font-semibold text-ink text-[15px]">Phoenixx OS</span>
+            <span className="font-semibold text-ink text-[16px] tracking-[-0.02em]">TeamBridge</span>
           </Link>
           <Link to="/login" className="text-[13.5px] text-[var(--brand)] hover:underline">Sign in instead</Link>
         </div>
@@ -121,7 +121,7 @@ export default function Signup() {
                 </div>
                 <Field label="Agency name" required error={fieldErrors.agency_name}>
                   <Input value={form.agency_name} onChange={(e) => set('agency_name', e.target.value)}
-                    placeholder="Phoenixx IT" autoFocus />
+                    placeholder="e.g. Acme Digital" autoFocus />
                 </Field>
                 <Field label="City" hint="Used on invoices and for your default tax profile">
                   <Input value={form.city} onChange={(e) => set('city', e.target.value)} placeholder="Coimbatore" />

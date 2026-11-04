@@ -18,6 +18,7 @@ const userSchema = z.object({
   role: z.enum(ROLES),
   custom_role_id: z.string().optional().nullable(),
   designation: z.string().optional().nullable(),
+  department: z.string().trim().max(80).optional().nullable(),
   phone: z.string().optional().nullable(),
   whatsapp: z.string().optional().nullable(),
   service_line_id: z.string().optional().nullable(),
@@ -41,7 +42,7 @@ const createUserSchema = userSchema.extend({
 });
 
 const SELECT = `
-  SELECT u.id, u.name, u.email, u.role, u.custom_role_id, u.designation, u.phone, u.whatsapp,
+  SELECT u.id, u.name, u.email, u.role, u.custom_role_id, u.designation, u.department, u.phone, u.whatsapp,
          u.service_line_id, u.manager_id, u.client_id, u.employment_type, u.date_of_joining,
          u.monthly_cost_minor, u.avatar_url, u.status, u.twofa_enabled, u.last_login_at, u.created_at,
          (u.security_answer_hash IS NOT NULL) AS has_security_question,
@@ -172,12 +173,12 @@ router.post('/', requires('users', 'create'), async (req, res) => {
   const inviteToken = direct ? null : token(24);
   await run(
     `INSERT INTO users (id, tenant_id, email, password_hash, name, phone, whatsapp, role, custom_role_id,
-       designation, service_line_id, manager_id, client_id, employment_type, date_of_joining,
+       designation, department, service_line_id, manager_id, client_id, employment_type, date_of_joining,
        monthly_cost_minor, status, invite_token, created_at, updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [id, tenantId, email, bcrypt.hashSync(direct || token(16), 10), body.name, body.phone ?? null,
       body.whatsapp ?? body.phone ?? null, body.role, body.custom_role_id ?? null,
-      body.designation ?? null, body.service_line_id ?? null, body.manager_id ?? null,
+      body.designation ?? null, body.department || null, body.service_line_id ?? null, body.manager_id ?? null,
       body.client_id ?? null, body.employment_type || 'full_time', body.date_of_joining ?? null,
       body.monthly_cost_minor || 0, direct ? 'active' : 'invited', inviteToken, nowIso(), nowIso()],
   );
