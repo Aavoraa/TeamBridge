@@ -2,6 +2,7 @@
   "name": "phoenixx-os",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "description": "Phoenixx OS - Integrated Agency Operations & Tracking Suite (multi-tenant SaaS)",
   "workspaces": [
     "server",
