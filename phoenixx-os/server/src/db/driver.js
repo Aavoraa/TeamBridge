@@ -198,6 +198,11 @@ export function databaseUrl() {
 export function backend() {
   if (!backendPromise) {
     const url = databaseUrl();
+    // A serverless function has no disk worth keeping, so the in-process
+    // fallback would silently lose every write. Say what is missing instead.
+    if (process.env.VERCEL && !/^postgres(ql)?:\/\//.test(url)) {
+      throw new Error('DATABASE_URL is not set: add your Neon / Supabase connection string in the Vercel project settings.');
+    }
     backendPromise = /^postgres(ql)?:\/\//.test(url)
       ? pgBackend(url)
       : pgliteBackend(url || process.env.PGLITE_DIR || './data/pglite');
