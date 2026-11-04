@@ -1,0 +1,27 @@
+node_modules/
+
+# The web bundle. Rebuilt from phoenixx-os/web on every `npm run build`, so it
+# is an artefact, not source.
+www/
+
+# The environment holds the API origin, which differs per developer and per
+# release. .env.example is the template that is committed.
+.env
+
+# Signing material. Losing the keystore means the Play Store listing can never
+# be updated again; leaking it means someone else can publish as you.
+*.keystore
+*.jks
+android/keystore.properties
+
+# Generated icon and splash PNGs — `npm run assets` recreates them from the
+# committed .svg sources next to them.
+assets/*.png
+
+# android/ and ios/ ARE committed. Capacitor can regenerate them, but they also
+# hold things it cannot: signing config, store metadata, permission entries and
+# any native code added later. Their own .gitignore files exclude build output.
+
+# Built app binaries — produced by `npm run sync` + gradle, never committed.
+*.apk
+*.aab

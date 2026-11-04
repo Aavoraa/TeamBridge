@@ -1,0 +1,31 @@
+{
+  "expo": {
+    "name": "Phoenixx OS",
+    "slug": "phoenixx-os",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "phoenixx",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": { "resizeMode": "contain", "backgroundColor": "#1E40AF" },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.phoenixxit.os",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Phoenixx OS records your location when you check in, so attendance from the field can be verified."
+      }
+    },
+    "android": {
+      "package": "com.phoenixxit.os",
+      "adaptiveIcon": { "backgroundColor": "#1E40AF" },
+      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"]
+    },
+    "extra": {
+      "apiBaseUrl": "http://10.0.2.2:4010"
+    },
+    "plugins": [
+      ["expo-location", { "locationWhenInUsePermission": "Phoenixx OS records your location when you check in." }]
+    ]
+  }
+}

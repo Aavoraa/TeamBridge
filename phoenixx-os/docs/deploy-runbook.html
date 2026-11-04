@@ -1,0 +1,692 @@
+<title>Phoenixx OS Deploy Runbook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+
+<style>
+  /* ---------- tokens: complete light palette on bare :root ---------- */
+  :root {
+    --ground:      #F6F7FA;
+    --surface:     #FFFFFF;
+    --surface-2:   #EEF1F7;
+    --line:        #DCE1EB;
+    --line-strong: #C3CBDA;
+    --ink:         #161E33;
+    --ink-2:       #4A5568;
+    --ink-3:       #6B7689;
+    --accent:      #1E40AF;
+    --accent-soft: #E8EDFB;
+    --live:        #0F7B4F;
+    --live-soft:   #E4F3EC;
+    --warn:        #B45309;
+    --warn-soft:   #FBF0E0;
+    --crit:        #B02A37;
+    --crit-soft:   #FBE9EB;
+    --code-bg:     #F0F3F9;
+    --shadow:      0 1px 2px rgba(22,30,51,.06), 0 8px 24px -12px rgba(22,30,51,.14);
+
+    --step:        1.5rem;
+    --measure:     68ch;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #0C1120;
+      --surface:     #141B2C;
+      --surface-2:   #1B2439;
+      --line:        #27314A;
+      --line-strong: #38445F;
+      --ink:         #E7ECF6;
+      --ink-2:       #AFB9CD;
+      --ink-3:       #8390A8;
+      --accent:      #7E9EF8;
+      --accent-soft: #1A2340;
+      --live:        #4FC48D;
+      --live-soft:   #12291F;
+      --warn:        #E0A25C;
+      --warn-soft:   #2A2013;
+      --crit:        #F08D97;
+      --crit-soft:   #2B161A;
+      --code-bg:     #101728;
+      --shadow:      0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:      #0C1120;
+    --surface:     #141B2C;
+    --surface-2:   #1B2439;
+    --line:        #27314A;
+    --line-strong: #38445F;
+    --ink:         #E7ECF6;
+    --ink-2:       #AFB9CD;
+    --ink-3:       #8390A8;
+    --accent:      #7E9EF8;
+    --accent-soft: #1A2340;
+    --live:        #4FC48D;
+    --live-soft:   #12291F;
+    --warn:        #E0A25C;
+    --warn-soft:   #2A2013;
+    --crit:        #F08D97;
+    --crit-soft:   #2B161A;
+    --code-bg:     #101728;
+    --shadow:      0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+  }
+
+  /* ---------- base ---------- */
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 62rem;
+    margin: 0 auto;
+    padding: clamp(1.75rem, 4vw, 3.5rem) clamp(1.1rem, 4vw, 2.5rem) 5rem;
+  }
+
+  h1, h2, h3 { text-wrap: balance; margin: 0; line-height: 1.22; }
+  p { margin: 0; max-width: var(--measure); }
+
+  code, .mono, kbd {
+    font-family: "IBM Plex Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+    font-variant-ligatures: none;
+  }
+
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible, .copyable:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+
+  /* ---------- masthead ---------- */
+  .masthead {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    padding-bottom: 1.75rem;
+    border-bottom: 2px solid var(--ink);
+  }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .72rem;
+    font-weight: 500;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  h1 {
+    font-size: clamp(1.9rem, 5.2vw, 3rem);
+    font-weight: 600;
+    letter-spacing: -.022em;
+  }
+
+  h1 .host {
+    font-family: "IBM Plex Mono", monospace;
+    font-weight: 500;
+    color: var(--accent);
+    font-size: .82em;
+    letter-spacing: -.01em;
+  }
+
+  .standfirst { color: var(--ink-2); font-size: 1.05rem; }
+
+  /* ---------- status strip ---------- */
+  .status {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-top: 2rem;
+  }
+
+  .status div { background: var(--surface); padding: .85rem 1rem; }
+
+  .status dt {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .68rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin-bottom: .3rem;
+  }
+
+  .status dd {
+    margin: 0;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .87rem;
+    font-weight: 500;
+    color: var(--ink);
+    word-break: break-word;
+  }
+
+  .dot {
+    display: inline-block;
+    width: .5rem; height: .5rem;
+    border-radius: 50%;
+    background: var(--live);
+    margin-right: .4rem;
+    vertical-align: baseline;
+  }
+  .status dd.ok { color: var(--live); }
+
+  /* ---------- sections ---------- */
+  section { margin-top: 3.5rem; }
+
+  .sec-head {
+    display: flex;
+    align-items: baseline;
+    gap: .8rem;
+    flex-wrap: wrap;
+    margin-bottom: 1.4rem;
+    padding-bottom: .55rem;
+    border-bottom: 1px solid var(--line-strong);
+  }
+
+  h2 {
+    font-size: 1.32rem;
+    font-weight: 600;
+    letter-spacing: -.012em;
+  }
+
+  .sec-note { color: var(--ink-3); font-size: .85rem; }
+
+  /* ---------- chain diagram ---------- */
+  .chain {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: .55rem;
+    padding: 1.35rem;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    box-shadow: var(--shadow);
+  }
+
+  .node {
+    flex: 1 1 9.5rem;
+    min-width: 8.5rem;
+    padding: .8rem .9rem;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+  }
+  .node.terminal { background: var(--accent-soft); border-color: var(--accent); }
+
+  .node .role {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .64rem;
+    letter-spacing: .11em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    display: block;
+    margin-bottom: .3rem;
+  }
+  .node .val {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .8rem;
+    font-weight: 500;
+    word-break: break-word;
+    display: block;
+  }
+  .node.terminal .val { color: var(--accent); }
+
+  .arrow {
+    align-self: center;
+    color: var(--ink-3);
+    font-size: 1.1rem;
+    line-height: 1;
+    flex: 0 0 auto;
+  }
+
+  .chain-caption {
+    margin-top: .8rem;
+    font-size: .87rem;
+    color: var(--ink-2);
+  }
+
+  /* ---------- numbered steps ---------- */
+  .steps { display: flex; flex-direction: column; gap: 1.1rem; }
+
+  .step {
+    display: grid;
+    grid-template-columns: 2.1rem 1fr;
+    gap: 1rem;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 1.25rem 1.35rem;
+    box-shadow: var(--shadow);
+  }
+
+  .num {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .95rem;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-radius: 4px;
+    height: 2.1rem;
+    display: grid;
+    place-items: center;
+  }
+
+  .step-body { display: flex; flex-direction: column; gap: .7rem; min-width: 0; }
+
+  h3 { font-size: 1.02rem; font-weight: 600; }
+
+  .where {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .76rem;
+    color: var(--ink-3);
+    word-break: break-all;
+  }
+
+  /* ---------- tables ---------- */
+  .scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+
+  table { border-collapse: collapse; width: 100%; font-size: .89rem; }
+
+  th, td {
+    text-align: left;
+    padding: .62rem .85rem;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+
+  th {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .68rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    font-weight: 500;
+    background: var(--surface-2);
+    white-space: nowrap;
+  }
+
+  td.v {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .84rem;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---------- code ---------- */
+  pre {
+    margin: 0;
+    padding: .85rem 1rem;
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    overflow-x: auto;
+    font-size: .83rem;
+    line-height: 1.65;
+    color: var(--ink);
+  }
+  pre .c { color: var(--ink-3); }
+
+  p code, li code, td code {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: .06em .34em;
+    font-size: .87em;
+  }
+
+  /* ---------- callouts ---------- */
+  .note {
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--ink-3);
+    background: var(--surface);
+    border-radius: 0 5px 5px 0;
+    padding: .85rem 1.05rem;
+    font-size: .9rem;
+    color: var(--ink-2);
+  }
+  .note.warn { border-left-color: var(--warn); background: var(--warn-soft); }
+  .note.crit { border-left-color: var(--crit); background: var(--crit-soft); }
+  .note.live { border-left-color: var(--live); background: var(--live-soft); }
+  .note strong { color: var(--ink); }
+
+  /* ---------- traps ---------- */
+  .traps { display: grid; grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); gap: 1rem; }
+
+  .trap {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 1.1rem 1.2rem;
+    display: flex;
+    flex-direction: column;
+    gap: .55rem;
+    box-shadow: var(--shadow);
+  }
+
+  .tag {
+    align-self: flex-start;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .63rem;
+    font-weight: 600;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    padding: .2rem .45rem;
+    border-radius: 3px;
+  }
+  .tag.crit { color: var(--crit); background: var(--crit-soft); }
+  .tag.warn { color: var(--warn); background: var(--warn-soft); }
+
+  .trap h3 { font-size: .96rem; }
+  .trap p { font-size: .88rem; color: var(--ink-2); }
+
+  .verdict {
+    font-size: .85rem;
+    padding-top: .55rem;
+    border-top: 1px dashed var(--line-strong);
+    color: var(--ink);
+  }
+  .verdict b { color: var(--live); font-weight: 600; }
+
+  /* ---------- perf bars ---------- */
+  .perf { display: flex; flex-direction: column; gap: .75rem; }
+  .bar-row { display: grid; grid-template-columns: 6.5rem 1fr 5rem; gap: .8rem; align-items: center; font-size: .87rem; }
+  .bar-track { background: var(--surface-2); border-radius: 3px; height: .8rem; overflow: hidden; border: 1px solid var(--line); }
+  .bar-fill { height: 100%; border-radius: 2px; }
+  .bar-num { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; text-align: right; font-size: .84rem; }
+
+  ul { margin: 0; padding-left: 1.1rem; max-width: var(--measure); }
+  li { margin-bottom: .4rem; }
+  li::marker { color: var(--ink-3); }
+
+  .stack { display: flex; flex-direction: column; gap: 1rem; }
+
+  footer {
+    margin-top: 4rem;
+    padding-top: 1.2rem;
+    border-top: 1px solid var(--line);
+    font-size: .82rem;
+    color: var(--ink-3);
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+
+  @media (max-width: 34rem) {
+    .step { grid-template-columns: 1fr; gap: .8rem; }
+    .num { width: 2.1rem; }
+    .bar-row { grid-template-columns: 5rem 1fr 4.2rem; font-size: .8rem; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <span class="eyebrow">Deployment runbook · verified 28 Aug 2026</span>
+    <h1>Phoenixx OS at <span class="host">app.phoenixxedu.com</span></h1>
+    <p class="standfirst">One Node process serves the React app and the API from a single origin on Render. This is how the domain, the certificate and the environment are wired — and the four traps that cost time when they bite.</p>
+  </header>
+
+  <dl class="status">
+    <div><dt>Address</dt><dd>app.phoenixxedu.com</dd></div>
+    <div><dt>Render service</dt><dd>phoenixx-os</dd></div>
+    <div><dt>Service ID</dt><dd>srv-da4nkks9v7es738o4ta0</dd></div>
+    <div><dt>Plan</dt><dd>free · no disk</dd></div>
+    <div><dt>Region</dt><dd>gcp-us-west1</dd></div>
+    <div><dt>TLS</dt><dd class="ok"><span class="dot"></span>valid</dd></div>
+  </dl>
+
+  <!-- ============================================ -->
+  <section>
+    <div class="sec-head">
+      <h2>How the request travels</h2>
+      <span class="sec-note">browser to app, four hops</span>
+    </div>
+
+    <div class="chain">
+      <div class="node">
+        <span class="role">Visitor asks for</span>
+        <span class="val">app.phoenixxedu.com</span>
+      </div>
+      <span class="arrow" aria-hidden="true">→</span>
+      <div class="node">
+        <span class="role">GoDaddy DNS · CNAME</span>
+        <span class="val">phoenixx-os.onrender.com</span>
+      </div>
+      <span class="arrow" aria-hidden="true">→</span>
+      <div class="node">
+        <span class="role">Render edge</span>
+        <span class="val">216.24.57.7 / .15</span>
+      </div>
+      <span class="arrow" aria-hidden="true">→</span>
+      <div class="node terminal">
+        <span class="role">One Node process</span>
+        <span class="val">SPA + /api/v1</span>
+      </div>
+    </div>
+
+    <p class="chain-caption">The last box is the whole point. <code>SERVE_WEB=true</code> makes Express serve <code>web/dist</code> alongside the API, so the React app and every <code>/api/v1</code> call share one origin. That is why there is no CORS configuration, why the chat SSE stream works, and why the subdomain covers the entire product rather than just a front end.</p>
+  </section>
+
+  <!-- ============================================ -->
+  <section>
+    <div class="sec-head">
+      <h2>Setting it up again</h2>
+      <span class="sec-note">order matters — each step needs the one before it</span>
+    </div>
+
+    <div class="steps">
+
+      <article class="step">
+        <div class="num">1</div>
+        <div class="step-body">
+          <h3>Add the CNAME at GoDaddy</h3>
+          <p class="where">dcc.godaddy.com → Domains → phoenixxedu.com → DNS → Add New Record</p>
+          <div class="scroll">
+            <table>
+              <thead>
+                <tr><th>Type</th><th>Name</th><th>Value</th><th>TTL</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="v">CNAME</td>
+                  <td class="v">app</td>
+                  <td class="v">phoenixx-os.onrender.com</td>
+                  <td class="v">600</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>The Name field takes <code>app</code> alone — GoDaddy appends the domain itself. TTL 600 while setting up keeps a mistake ten minutes expensive instead of three hours.</p>
+        </div>
+      </article>
+
+      <article class="step">
+        <div class="num">2</div>
+        <div class="step-body">
+          <h3>Claim the domain on Render</h3>
+          <p class="where">dashboard.render.com → phoenixx-os → Settings → Custom Domains</p>
+          <p>Add <code>app.phoenixxedu.com</code>. Render verifies the CNAME, then issues and auto-renews a certificate. It keeps serving <code>phoenixx-os.onrender.com</code> at the same time, so anything already pointed there — including installed mobile builds — keeps working.</p>
+        </div>
+      </article>
+
+      <article class="step">
+        <div class="num">3</div>
+        <div class="step-body">
+          <h3>Verify from outside</h3>
+          <pre><span class="c"># DNS should show the onrender host as an alias</span>
+nslookup app.phoenixxedu.com 8.8.8.8
+
+<span class="c"># 200 and a clean TLS verify means done</span>
+curl -s -o /dev/null \
+  -w "status=%{http_code} tls=%{ssl_verify_result}\n" \
+  https://app.phoenixxedu.com/api/v1/health</pre>
+          <p><code>tls=0</code> is a validated certificate. Render's dashboard may still say "issuing" after the certificate is actually live, so trust this over the banner.</p>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- ============================================ -->
+  <section>
+    <div class="sec-head">
+      <h2>Traps</h2>
+      <span class="sec-note">independent hazards, not a sequence</span>
+    </div>
+
+    <div class="traps">
+
+      <article class="trap">
+        <span class="tag crit">silent</span>
+        <h3>cPanel's Zone Editor is not authoritative</h3>
+        <p>For <code>phoenixxit.com</code>, the SOA primary is <code>ns77.domaincontrol.com</code> — GoDaddy account DNS, not the cPanel box. Records added in cPanel's Zone Editor go to a zone file nothing on the internet queries. No error, no effect.</p>
+        <p class="verdict">Edit DNS at <b>dcc.godaddy.com</b> for both domains.</p>
+      </article>
+
+      <article class="trap">
+        <span class="tag crit">breaks invites</span>
+        <h3>WEB_BASE_URL falls back to localhost</h3>
+        <p>Unset, it defaults to <code>http://localhost:5173</code> — and that string builds client proposal share links (<code>/p/:token</code>) and team invite links (<code>/accept-invite</code>). Every invite you send would point at the recipient's own machine.</p>
+        <p class="verdict">Pinned in <b>render.yaml</b>. Confirm a real invite URL after any service rebuild.</p>
+      </article>
+
+      <article class="trap">
+        <span class="tag warn">wrong server</span>
+        <h3>Never make <code>app</code> a cPanel subdomain</h3>
+        <p>cPanel's Subdomains tool would create <code>app</code> as a folder on the cPanel box serving static files. The app lives on Render, not there — and the record would fight the CNAME.</p>
+        <p class="verdict">The app needs <b>a DNS record only</b>. cPanel should not know it exists.</p>
+      </article>
+
+      <article class="trap">
+        <span class="tag warn">build-time</span>
+        <h3>The mobile API origin is frozen at build</h3>
+        <p><code>VITE_API_URL</code> is compiled into the bundle, so a phone already carrying the app keeps calling whatever origin it was built against. Changing the domain does not reach installed apps.</p>
+        <p class="verdict">Changing origin means <b>rebuild and reinstall</b>.</p>
+      </article>
+
+      <article class="trap">
+        <span class="tag warn">may not apply</span>
+        <h3>render.yaml only syncs via Blueprint</h3>
+        <p>If the service was created manually rather than from the Blueprint, Render ignores <code>render.yaml</code> entirely — including the env vars that keep invite links correct.</p>
+        <p class="verdict">Then set them by hand under <b>Settings → Environment</b>.</p>
+      </article>
+
+      <article class="trap">
+        <span class="tag warn">two domains</span>
+        <h3>Two Phoenixx domains, easily confused</h3>
+        <p><code>phoenixxit.com</code> (ns77/ns78, apex → 107.180.116.47, a GoDaddy cPanel box) hosts the website. <code>phoenixxedu.com</code> (ns17/ns18, apex → 198.12.233.125) carries this app.</p>
+        <p class="verdict">Phoenixx OS lives on <b>phoenixxedu.com</b> — deliberate, despite @phoenixxit.com seed accounts.</p>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- ============================================ -->
+  <section>
+    <div class="sec-head">
+      <h2>Environment that matters</h2>
+      <span class="sec-note">the rest have working defaults</span>
+    </div>
+
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>Variable</th><th>Value</th><th>Why it matters</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="v">SERVE_WEB</td><td class="v">true</td><td>Serves <code>web/dist</code> from the API process. One origin, no CORS.</td></tr>
+          <tr><td class="v">WEB_BASE_URL</td><td class="v">https://app.phoenixxedu.com</td><td>Builds proposal share and team invite links. Unset ships localhost URLs to real people.</td></tr>
+          <tr><td class="v">API_BASE_URL</td><td class="v">https://app.phoenixxedu.com</td><td>Self-reference in logs and the OpenAPI docs link.</td></tr>
+          <tr><td class="v">JWT_ACCESS_SECRET</td><td class="v">generated</td><td>Production refuses to boot on the repo's dev defaults. Render generates and holds these.</td></tr>
+          <tr><td class="v">JWT_REFRESH_SECRET</td><td class="v">generated</td><td>Same guard. Never commit real values.</td></tr>
+          <tr><td class="v">SEED_ON_BOOT</td><td class="v">true</td><td>Rebuilds the demo workspace when the database comes up empty. Set false once a disk is attached.</td></tr>
+          <tr><td class="v">NODE_VERSION</td><td class="v">22.13.0</td><td><code>node:sqlite</code> needs 22.5+; the app requires 22.13+.</td></tr>
+          <tr><td class="v">JOBS_ENABLED</td><td class="v">true</td><td>Deadline ladder, digests, recurring invoices. Assumes exactly one instance.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============================================ -->
+  <section>
+    <div class="sec-head">
+      <h2>What the free tier actually costs</h2>
+      <span class="sec-note">measured 28 Aug 2026</span>
+    </div>
+
+    <div class="stack">
+      <div class="perf">
+        <div class="bar-row">
+          <span>Warm</span>
+          <div class="bar-track"><div class="bar-fill" style="width:0.8%; background: var(--live);"></div></div>
+          <span class="bar-num">0.32 s</span>
+        </div>
+        <div class="bar-row">
+          <span>Cold start</span>
+          <div class="bar-track"><div class="bar-fill" style="width:100%; background: var(--crit);"></div></div>
+          <span class="bar-num">42.8 s</span>
+        </div>
+      </div>
+
+      <div class="note crit"><strong>The instance sleeps after ~15 minutes idle, and the database goes with it.</strong> There is no persistent disk on the free plan, so SQLite is rebuilt from the demo seed on every cold start. Anything a user typed is gone. A real domain in front of this reads as a production system to whoever you send the link to.</div>
+
+      <div class="note warn"><strong>The service runs in Oregon, not Singapore.</strong> <code>render.yaml</code> requests <code>region: singapore</code>, but the live host resolves to <code>gcp-us-west1</code> — free instances are not offered in every region. From India that is roughly 250 ms of round trip on every API call. Region cannot be changed on an existing Render service; it needs recreating.</div>
+
+      <p><strong>The fix for both is one decision.</strong> Move to <code>plan: starter</code> and uncomment the <code>disk:</code> block in <code>render.yaml</code>, set <code>DB_FILE=/var/data/phoenixx.db</code>, <code>STORAGE_DIR=/var/data/storage</code> and <code>SEED_ON_BOOT=false</code>, then seed once from the Render shell. Roughly $7/month plus about $0.25/GB. Recreating in Singapore at the same time also removes the latency — at the cost of redoing the DNS step above.</p>
+
+      <div class="note"><strong>Keep it at one instance.</strong> SQLite has a single writer, the chat fan-out is an in-process EventEmitter, and the job runner has no leader election. A second instance would get its own database and its own chat bus — users would silently see different data and miss each other's messages.</div>
+    </div>
+  </section>
+
+  <!-- ============================================ -->
+  <section>
+    <div class="sec-head">
+      <h2>Where this lives in the repo</h2>
+      <span class="sec-note">the setting is code, not dashboard state</span>
+    </div>
+
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>File</th><th>Holds</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="v">render.yaml</td><td>The custom domain, both base URLs, plan, region and every env var. Repo root — Render looks nowhere else.</td></tr>
+          <tr><td class="v">phoenixx-os/docs/DEPLOY.md</td><td>The long-form version of this page, including the paid tier and backups.</td></tr>
+          <tr><td class="v">phoenixx-os/.env.example</td><td>Every variable with a working default, and why <code>WEB_BASE_URL</code> is not cosmetic.</td></tr>
+          <tr><td class="v">phoenixx-os-mobile/.env</td><td>The API origin baked into Android and iOS builds.</td></tr>
+          <tr><td class="v">.github/workflows/mobile.yml</td><td>CI default for <code>VITE_API_URL</code> when no repo variable is set.</td></tr>
+          <tr><td class="v">phoenixx-os/server/src/config.js</td><td>The fallbacks, and the production guard that refuses weak JWT secrets.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note live" style="margin-top:1rem;"><strong>Health check after any change:</strong> <code>npm test</code> in <code>phoenixx-os/</code> — 197 tests, about 13 seconds. Then <code>npm --workspace web run typecheck</code>. Note that <code>npm run build</code> uses <code>tsc -b --noCheck</code>, so a build passing does <em>not</em> mean the types are clean.</div>
+  </section>
+
+  <footer>
+    <span>Phoenixx OS · deployment runbook</span>
+    <span class="mono">verified 2026-08-28</span>
+  </footer>
+
+</div>

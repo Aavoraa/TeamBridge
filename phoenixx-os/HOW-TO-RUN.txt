@@ -1,0 +1,303 @@
+===============================================================================
+ PHOENIXX OS - HOW TO RUN
+===============================================================================
+
+ Integrated agency operations suite. Three parts in one repo:
+
+   server/   the API + database + background jobs
+   web/      the web app (this is the full product)
+   mobile/   the phone app (six high-frequency actions)
+
+
+-------------------------------------------------------------------------------
+ BEFORE YOU START
+-------------------------------------------------------------------------------
+
+ You need Node.js 22.13 or newer. Check with:
+
+     node -v
+
+ That is the only prerequisite. No database to install, no Docker, no Redis.
+ Locally the app runs PostgreSQL in-process (PGlite) and keeps its data in
+ server/data/pglite. Set DATABASE_URL to use a real PostgreSQL server instead.
+ Deploying to Vercel: see docs/DEPLOY.md.
+
+
+-------------------------------------------------------------------------------
+ QUICK START  (3 commands)
+-------------------------------------------------------------------------------
+
+ Open a terminal in this folder (phoenixx-os) and run:
+
+     npm install
+     npm run seed
+     npm run dev
+
+ Wait for the terminal to print two lines like:
+
+     [api]  Phoenixx OS API listening ... port 4010
+     [web]  Local: http://localhost:5173/
+
+ Then open the web address in your browser.
+
+ Leave that terminal open. Closing it stops both servers.
+
+--------------------------------------------------------
+-------------------------------------------------------------------------------
+ SIGNING IN
+-------------------------------------------------------------------------------
+
+ The login screen lists these accounts. Tap any row to fill the form in.
+
+     ROLE        EMAIL                      WHAT THEY SEE
+     ---------------------------------------------------------------------
+     Owner       arun@phoenixxit.com        Everything
+     Manager     divya@phoenixxit.com       Their team, approvals, escalations
+     Finance     meera@phoenixxit.com       Invoices, costs, profitability
+     HR          sanjay@phoenixxit.com      Attendance, leave, hiring
+     Employee    priya@phoenixxit.com       Only their own work
+
+     Password for all of the above:  Phoenixx@2026
+
+ Platform console (manages all tenants, not one agency):
+
+     platform@phoenixxit.com   /   Platform@2026
+
+ Sign in as different roles to see access control working - an employee has no
+ Invoices or Billing in the sidebar at all, and the API refuses those routes
+ even if you type the URL directly.
+
+ FORGOT THE PASSWORD?
+
+     "Forgot your password?" under the password box recovers an account with
+     its security question - no email is sent, and no admin is needed.
+
+     Every seeded account answers the same question:
+
+         "Which city were you in when you started your first job?"
+         Coimbatore
+
+     Answer it, set a new password, and sign in again. Five wrong answers lock
+     recovery on that account for 15 minutes. People who join for real pick
+     their own question when they accept their invitation.
+
+
+-------------------------------------------------------------------------------
+ WHAT THE SEED CREATES
+-------------------------------------------------------------------------------
+
+ "npm run seed" builds Phoenixx IT as tenant #1 with three months of realistic
+ history, so nothing looks empty:
+
+     11 team members across 4 service lines
+     15 clients spread across every pipeline stage
+     26 invoices (some paid, some part-paid, some deliberately overdue)
+     142 action items, 3 months of attendance, 22 SOP runs
+     10 SOPs, 13 KPI/KRA definitions, 4 proposal templates
+     2 open roles and 7 candidates
+
+ It also creates a SECOND agency (Northstar Media) so you can prove tenant
+ isolation for yourself: sign in as rekha@northstarmedia.in / Northstar@2026
+ and you will see none of Phoenixx IT's data.
+
+ To wipe everything and start over:
+
+     npm run reset
+
+
+-------------------------------------------------------------------------------
+ A GOOD 5-MINUTE TOUR
+-------------------------------------------------------------------------------
+
+ 1. Sign in as the OWNER (arun@phoenixxit.com).
+
+ 2. Traction dashboard  ->  the five pillars, plus a red "lagging indicators"
+    bar. Click any red number - it opens the actual records behind it.
+
+ 3. Invoices  ->  the green "Numbering integrity" bar shows
+    "26 invoices, 0 duplicates, 0 gaps". Open any invoice to see the
+    CGST/SGST split, or the IGST split on a Bengaluru client. Hit "PDF".
+
+ 4. CRM pipeline  ->  cards flagged "No next action set" in amber. That flag
+    is what stops leads going quiet.
+
+ 5. Open a client  ->  Scorecard tab. Every score shows the inputs that
+    produced it, not just the number.
+
+ 6. Proposals  ->  open one marked "sent", copy the share link, and paste it
+    into a private window. That is what your client sees. Accepting it there
+    moves them to Onboarding and notifies the owner.
+
+ 7. Settings -> Invoicing  ->  explains, in plain language, the four things
+    that make duplicate invoice numbers impossible.
+
+
+-------------------------------------------------------------------------------
+ IF SOMETHING DOES NOT WORK
+-------------------------------------------------------------------------------
+
+ "Port 5173 is already in use"
+ "Port 4010 is already in use"
+
+     Something else on this machine is using that port. Note: on THIS machine
+     ports 4000 and 5173 are already taken by your mail-automation project.
+
+     For the web app, Vite will normally pick another port by itself and print
+     it - just use the address it prints.
+
+     To force different ports:
+
+         Windows (PowerShell):
+             $env:PORT=4020; npm run dev:api
+             npm run dev:web
+
+         macOS / Linux:
+             PORT=4020 npm run dev:api
+             npm run dev:web
+
+     If you change the API port, also update the proxy target in
+     web/vite.config.ts (the line with "target:").
+
+
+ "EPERM: permission denied ... phoenixx.db"
+
+     The API is still running and holding the database file. Stop the "npm run
+     dev" terminal (Ctrl+C) before running "npm run reset", then start it again.
+
+
+ The page loads but everything is empty
+
+     The seed has not been run. Stop the servers, run "npm run seed", start
+     them again.
+
+
+ "Unauthorized" everywhere / it keeps logging you out
+
+     You reset the database while still signed in, so your session points at a
+     user that no longer exists. Just sign in again.
+
+
+ Nothing loads at all
+
+     Check the API is alive:
+
+         curl http://localhost:4010/api/v1/health
+
+     It should answer {"status":"ok",...}. If it does not, look at the [api]
+     lines in your "npm run dev" terminal for the real error.
+
+
+-------------------------------------------------------------------------------
+ OTHER COMMANDS
+-------------------------------------------------------------------------------
+
+     npm test              Run the test suite (142 tests, ~4 seconds)
+     npm run build         Production build of the web app -> web/dist
+     npm start             Run the API alone, without the dev web server
+     npm run dev:api       API only
+     npm run dev:web       Web only
+
+ API documentation (OpenAPI) while the server is running:
+
+     http://localhost:4010/api/v1/openapi.json
+
+
+-------------------------------------------------------------------------------
+ CONFIGURATION  (optional - it runs fine with none)
+-------------------------------------------------------------------------------
+
+ Everything has a working default. You only need a .env file when connecting
+ real services:
+
+     copy .env.example .env          (Windows)
+     cp .env.example .env            (macOS / Linux)
+
+ The settings that matter:
+
+     PORT                    API port (default 4010)
+     JWT_ACCESS_SECRET       CHANGE BOTH OF THESE BEFORE DEPLOYING
+     JWT_REFRESH_SECRET
+     WHATSAPP_PROVIDER       log (default) | meta | gupshup | wati
+     EMAIL_PROVIDER          log (default) | smtp
+     TEAMS_WEBHOOK_URL       Incoming webhook for Teams alerts
+     RAZORPAY_KEY_ID         Subscription billing (India)
+     STRIPE_SECRET_KEY       Subscription billing (international)
+     JOBS_ENABLED            false to stop the background job runner
+
+ About the "log" providers: with the defaults, WhatsApp and email messages are
+ NOT sent anywhere. They are written to the delivery log and printed in the
+ terminal. So you can watch the whole reminder-and-escalation chain work
+ without a WhatsApp Business account. See Notifications -> Delivery log.
+
+
+-------------------------------------------------------------------------------
+ THE MOBILE APPS - THERE ARE TWO, PICK ONE
+-------------------------------------------------------------------------------
+
+ 1. ../phoenixx-os-mobile/    Capacitor. Wraps the FULL web app - every screen,
+                              every feature - as an Android and iOS app. One
+                              codebase: build the web app, build the phone app.
+                              This is the one to use.
+
+                              See ../phoenixx-os-mobile/HOW-TO-RUN.txt
+
+ 2. mobile/                   React Native / Expo. Six high-frequency screens,
+                              hand-written separately from the web app. Older,
+                              and it does not cover the product. Documented
+                              below for reference.
+
+ Neither replaces the other automatically - they are separate folders and
+ separate builds. The rest of this section is about option 2.
+
+     cd mobile
+     npm install
+     npm start
+
+ Then press "a" for Android or "i" for iOS, or scan the QR code with the
+ Expo Go app on your phone.
+
+ IMPORTANT: tell the phone where the API is. Edit mobile/app.json, the
+ "apiBaseUrl" line:
+
+     Android emulator     http://10.0.2.2:4010
+     iOS simulator        http://localhost:4010
+     Real phone           http://<your-computer's-LAN-IP>:4010
+
+ A real phone must be on the same Wi-Fi as your computer.
+
+ HONEST NOTE: the mobile app is written and type-checked but has never been
+ run on a real device or simulator - there was no Android/iOS toolchain
+ available while building it. Expect the usual first-run Expo tidying
+ (run "npx expo install --fix", and add icon images). The web app, by
+ contrast, has been run and checked page by page.
+
+
+-------------------------------------------------------------------------------
+ WHAT IS RUNNING RIGHT NOW
+-------------------------------------------------------------------------------
+
+ As of handover, both servers were left running for you:
+
+     API        http://localhost:4010
+     Web app    http://localhost:59091      <- open this one
+
+ (The web app is on 59091 rather than the usual 5173 because 5173 was already
+ taken on this machine.)
+
+ To stop them: close the terminal they are running in, or in PowerShell:
+
+     Get-Process node | Stop-Process -Force
+
+ Careful - that stops EVERY Node process, including your other projects.
+
+
+-------------------------------------------------------------------------------
+ WHERE TO READ MORE
+-------------------------------------------------------------------------------
+
+     README.md                  Overview, and the parts worth knowing about
+     docs/ARCHITECTURE.md       How it is built and why
+     docs/PRD-COVERAGE.md       Every PRD requirement and where it landed,
+                                including what was deliberately not built
+
+===============================================================================

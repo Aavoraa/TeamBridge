@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug builds only.
+
+  Android blocks plain http:// from an app by default, which is correct for
+  release but stops you pointing a debug build at the API running on your own
+  machine (http://192.168.x.x:4010) or at a Vite dev server for live reload.
+  This file is not merged into a release APK, so the shipped app still refuses
+  cleartext.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:usesCleartextTraffic="true" />
+</manifest>

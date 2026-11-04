@@ -1,0 +1,17 @@
+node_modules/
+dist/
+build/
+.env
+*.log
+server/data/*.db
+server/data/*.db-*
+server/storage/
+web/dist/
+.expo/
+.DS_Store
+web/tsconfig.tsbuildinfo
+
+# Vercel CLI
+.vercel
+# Local in-process PostgreSQL (PGlite)
+server/data/

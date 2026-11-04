@@ -1,0 +1,24 @@
+{
+  "name": "task-management",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Container folder only. The real project lives in phoenixx-os/ - these scripts just forward there so npm works from either directory.",
+  "scripts": {
+    "postinstall": "npm --prefix phoenixx-os install",
+    "dev": "npm --prefix phoenixx-os run dev",
+    "dev:api": "npm --prefix phoenixx-os run dev:api",
+    "dev:web": "npm --prefix phoenixx-os run dev:web",
+    "build": "npm --prefix phoenixx-os run build",
+    "seed": "npm --prefix phoenixx-os run seed",
+    "reset": "npm --prefix phoenixx-os run reset",
+    "test": "npm --prefix phoenixx-os run test",
+    "start": "npm --prefix phoenixx-os run start",
+    "mobile:build": "npm --prefix phoenixx-os-mobile run build",
+    "mobile:sync": "npm --prefix phoenixx-os-mobile run sync",
+    "mobile:android": "npm --prefix phoenixx-os-mobile run android",
+    "mobile:ios": "npm --prefix phoenixx-os-mobile run ios"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}

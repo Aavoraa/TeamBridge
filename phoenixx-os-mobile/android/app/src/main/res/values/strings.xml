@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Phoenixx OS</string>
+    <string name="title_activity_main">Phoenixx OS</string>
+    <string name="package_name">com.phoenixx.os</string>
+    <string name="custom_url_scheme">com.phoenixx.os</string>
+</resources>

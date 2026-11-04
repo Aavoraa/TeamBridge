@@ -1,0 +1,417 @@
+===============================================================================
+ PHOENIXX OS - MOBILE APP - HOW TO RUN
+===============================================================================
+
+ The Android and iOS build of Phoenixx OS.
+
+ This folder is a shell, not an app. It has no React code in it. It takes the
+ web app from ../phoenixx-os/web, wraps it in a native container (Capacitor),
+ and produces something you can install on a phone.
+
+ That means there is ONE codebase. Ship a feature in the web app and it is in
+ the phone app the next time you build. You never write a screen twice.
+
+ NOT to be confused with ../phoenixx-os/mobile - that is a separate, older
+ React Native / Expo app with six screens. Different approach, different
+ folder. This one gives you the whole product.
+
+
+-------------------------------------------------------------------------------
+ WHAT YOU NEED
+-------------------------------------------------------------------------------
+
+ To build the ANDROID app:
+
+     Node.js 22.13+          check with:  node -v
+     Android Studio          https://developer.android.com/studio
+                             (it bundles the JDK - no separate Java install)
+
+ To build the iOS app:
+
+     A Mac with Xcode 16+
+
+     Apple does not allow iOS builds on Windows or Linux. There is no way
+     around this locally. BUT - see "BUILDING WITHOUT ANY OF THIS" below,
+     which removes the Mac requirement entirely.
+
+ CocoaPods is NOT needed. This project uses Swift Package Manager.
+
+
+-------------------------------------------------------------------------------
+ THE ONE SETTING YOU MUST GET RIGHT
+-------------------------------------------------------------------------------
+
+ Copy .env.example to .env and check the line inside it:
+
+     VITE_API_URL=https://app.phoenixxedu.com
+
+ Origin only. No trailing slash. No /api/v1 on the end - that gets added for
+ you.
+
+ WHY THIS EXISTS. On the web, the app and the API are served from the same
+ address, so the code can just ask for "/api/v1/..." and it works. On a phone
+ there is no such thing - the app's own address IS the phone. A relative path
+ would ask the handset for your data. So the phone build has to be told the
+ real, absolute address of the server.
+
+ The build refuses to start if this is missing or malformed. That is
+ deliberate: the alternative failure is silent. The app would install, launch,
+ look perfect, and every single screen would be empty.
+
+
+-------------------------------------------------------------------------------
+ QUICK START - ANDROID  (4 commands)
+-------------------------------------------------------------------------------
+
+ Open a terminal in this folder (phoenixx-os-mobile):
+
+     npm install
+     copy .env.example .env          (Windows)
+     cp .env.example .env            (macOS / Linux)
+     npm run android
+
+ The last command does three things: builds the web app, copies it into the
+ native project, and opens Android Studio.
+
+ In Android Studio, wait for "Gradle sync finished" at the bottom. First time
+ this takes several minutes - it is downloading Gradle and the Android SDK.
+ Then:
+
+     Build  ->  Build Bundle(s) / APK(s)  ->  Build APK(s)
+
+ When it finishes, click "locate" in the popup. That .apk file is your app.
+ Copy it to an Android phone and open it. You will have to allow "install from
+ unknown sources" the first time.
+
+ Or, with a phone plugged in via USB and developer mode on, skip Studio
+ entirely:
+
+     npm run run:android
+
+
+-------------------------------------------------------------------------------
+ QUICK START - iOS  (on a Mac)
+-------------------------------------------------------------------------------
+
+     npm install
+     cp .env.example .env
+     npm run ios
+
+ Xcode opens. Then:
+
+     1. Click "App" in the left sidebar
+     2. Signing & Capabilities tab  ->  pick your Team
+     3. Choose a simulator or your connected iPhone at the top
+     4. Press the Play button
+
+ For a build you can submit to the App Store, choose "Any iOS Device" as the
+ target, then Product -> Archive -> Distribute App.
+
+
+-------------------------------------------------------------------------------
+ BUILDING WITHOUT ANY OF THIS  (no Android Studio, no Mac)
+-------------------------------------------------------------------------------
+
+ Already set up. Push the branch to GitHub and it builds both apps for you:
+
+     .github/workflows/mobile.yml
+
+ Android builds on a Linux runner, iOS on a hosted Mac. Go to the Actions tab
+ on GitHub, open the run, and download the files from the Artifacts section at
+ the bottom of the summary page.
+
+ What you get with no extra setup:
+
+     Android    a debug .apk you can install on a phone right away
+     iOS        an unsigned archive - proves it compiles, but is NOT
+                installable and cannot be submitted
+
+ To get a Play Store .aab, add these four secrets under
+ Settings -> Secrets and variables -> Actions:
+
+     ANDROID_KEYSTORE_BASE64      (see SHIPPING TO THE PLAY STORE below)
+     ANDROID_KEYSTORE_PASSWORD
+     ANDROID_KEY_ALIAS
+     ANDROID_KEY_PASSWORD
+
+ To get a real .ipa you additionally need an Apple Developer membership
+ ($99/year), a distribution certificate and a provisioning profile. No CI
+ system can work around that. The comment block at the bottom of the workflow
+ file says what to add once you have them.
+
+
+-------------------------------------------------------------------------------
+ THE EVERYDAY LOOP  (do not rebuild for every change)
+-------------------------------------------------------------------------------
+
+ Rebuilding the whole app to check a colour change is painful and unnecessary.
+ Point the installed app at your running dev server instead, and it reloads on
+ the phone as you type.
+
+ Terminal 1 - start the API and web dev server:
+
+     cd ../phoenixx-os
+     npm run dev
+
+ Terminal 2 - use your computer's LAN IP, NOT localhost:
+
+     Windows (PowerShell):
+         $env:CAP_SERVER_URL="http://192.168.1.5:5174"; npx cap run android
+
+     macOS / Linux:
+         CAP_SERVER_URL=http://192.168.1.5:5174 npx cap run android
+
+ Find your IP with "ipconfig" (Windows) or "ifconfig | grep inet" (Mac). The
+ phone and the computer must be on the same Wi-Fi.
+
+ Remember: localhost on a phone means the phone. It will never reach your PC.
+
+ TO SEE THE CONSOLE AND NETWORK TAB of the running app:
+
+     Android    open Chrome on your computer  ->  chrome://inspect
+     iOS        Safari  ->  Develop menu  ->  your device
+
+ It is a real browser engine inside, so you get full DevTools. This is the
+ fastest way to diagnose anything.
+
+
+-------------------------------------------------------------------------------
+ AFTER YOU CHANGE THE WEB APP
+-------------------------------------------------------------------------------
+
+     npm run sync
+
+ Editing ../phoenixx-os/web does nothing to the installed app until you run
+ this. It rebuilds the bundle and copies it into android/ and ios/.
+
+ This is the single most common "why is my change not showing up".
+
+
+-------------------------------------------------------------------------------
+ SHIPPING TO THE PLAY STORE
+-------------------------------------------------------------------------------
+
+ 1. Create a signing key. ONCE, ever. Needs the JDK from Android Studio.
+
+        keytool -genkey -v -keystore phoenixx-release.jks -keyalg RSA -keysize 2048 -validity 10000 -alias phoenixx
+
+    Then copy android/keystore.properties.example to
+    android/keystore.properties and fill in what you just chose.
+
+    *** BACK UP THE .jks FILE AND ITS PASSWORDS SOMEWHERE OFF THIS MACHINE. ***
+
+    This is not routine advice. If you lose that file you can never update the
+    app on the Play Store again - not with a new key, not by contacting
+    Google. The listing is finished and you start over with a new one. It is
+    the single most expensive mistake available in Android development.
+
+ 2. Raise the version in android/app/build.gradle:
+
+        versionCode 1      ->  must go UP by at least 1 on every upload
+        versionName "1.0"  ->  the text users see
+
+ 3. Build:
+
+        npm run sync
+        cd android
+        gradlew bundleRelease          (Windows)
+        ./gradlew bundleRelease        (macOS / Linux)
+
+    The file appears in:
+
+        android/app/build/outputs/bundle/release/app-release.aab
+
+ 4. Upload it at https://play.google.com/console
+    (one-time $25 registration fee)
+
+ For sideloading rather than the store, use "assembleRelease" instead of
+ "bundleRelease" and you get an .apk.
+
+
+-------------------------------------------------------------------------------
+ IF SOMETHING DOES NOT WORK
+-------------------------------------------------------------------------------
+
+ Every screen is empty, or login says the network failed
+
+     Almost always VITE_API_URL. Check what actually got built in:
+
+         findstr /C:"onrender" www\assets\index-*.js     (Windows)
+         grep -o "https://[^\"]*" www/assets/index-*.js  (macOS / Linux)
+
+     If that looks right, the server is refusing the app. Open chrome://inspect
+     and look for a CORS error in the console. The fix for that lives in
+     ../phoenixx-os/server/src/config.js and has to be DEPLOYED, not just
+     saved - see the honest note at the bottom of this file.
+
+
+ My change to the web app is not in the phone app
+
+     Run "npm run sync". See "AFTER YOU CHANGE THE WEB APP" above.
+
+
+ "JAVA_HOME is not set" / Gradle fails with a strange path error
+
+     Install Android Studio, then point JAVA_HOME at the JDK it bundles,
+     usually:
+
+         C:\Program Files\Android\Android Studio\jbr
+
+     Close and reopen your terminal afterwards.
+
+     ALSO WORTH KNOWING: this repo sits in a folder path containing spaces
+     ("ui ux\task management"). Gradle normally copes, but if you hit a
+     path-related failure that makes no sense at all, that is the first thing
+     to rule out. Moving the repo to something like C:\dev\phoenixx fixes it.
+
+
+ "cap sync" says "Found 0 Capacitor plugins"
+
+     Run "npm install" in THIS folder. The plugins have to be installed here,
+     not only in the web app, because the native half of each plugin is what
+     gets compiled into the app.
+
+
+ Android Studio sits on "Gradle sync" forever the first time
+
+     It is downloading a few hundred MB. Leave it. Only worry after ~15
+     minutes on a decent connection.
+
+
+ iOS: "No account for team"
+
+     Xcode -> Settings -> Accounts -> add your Apple ID. Then pick the team
+     under Signing & Capabilities.
+
+
+ iOS build fails on Package.swift
+
+     Run "npm run sync" once. A sync performed on Windows writes that file
+     with the wrong kind of slash, and the sync script repairs it
+     automatically. If you copied this folder from a Windows machine without
+     re-syncing, that is the cause.
+
+
+-------------------------------------------------------------------------------
+ ALL THE COMMANDS
+-------------------------------------------------------------------------------
+
+     npm run build         Build the web app and stage it in www/
+     npm run sync          build + copy into android/ and ios/
+     npm run android       sync, then open Android Studio
+     npm run ios           sync, then open Xcode (Mac only)
+     npm run run:android   sync, then build and launch on a plugged-in phone
+     npm run assets        Regenerate every app icon and splash screen size
+     npm run doctor        Show what toolchain Capacitor can see
+
+ From the repo root, the same things:
+
+     npm run mobile:build
+     npm run mobile:sync
+     npm run mobile:android
+     npm run mobile:ios
+
+
+-------------------------------------------------------------------------------
+ WHAT IS IN THIS FOLDER
+-------------------------------------------------------------------------------
+
+     capacitor.config.ts   App name, app ID, splash and status bar settings
+     .env                  The API address (you create this; not committed)
+     scripts/              Build and asset-generation scripts
+     assets/               Source icon and splash art (SVG)
+     www/                  The built web bundle. Generated - never edit
+     android/              A real Android Studio project
+     ios/                  A real Xcode project
+
+ App name on the phone:  Phoenixx OS
+ App ID:                 com.phoenixx.os
+
+ android/ and ios/ ARE committed to git, on purpose. Capacitor can regenerate
+ them, but they also hold things it cannot: your signing setup, permissions,
+ and store metadata.
+
+
+-------------------------------------------------------------------------------
+ HONEST NOTE ON WHAT HAS AND HAS NOT BEEN TESTED
+-------------------------------------------------------------------------------
+
+ VERIFIED, by actually running it:
+
+     The web app still works after the changes needed for mobile - signed in
+     through a browser, session survived a reload, dashboard loaded real data,
+     every API call returned 200, theme toggle persisted.
+
+     The mobile-only behaviour correctly stays switched OFF in a browser.
+
+     The web bundle builds with the API address baked in correctly.
+
+     Both native projects generate, and all 8 Capacitor plugins register on
+     each platform.
+
+     The full clean-install sequence that CI runs works start to finish.
+
+     197 of 197 server tests pass.
+
+     AN ANDROID APK HAS NOW BEEN BUILT.  (25 Aug 2026, on Windows, using the
+     JDK bundled with Android Studio and SDK build-tools 36.)
+
+         gradlew clean assembleDebug    ->  BUILD SUCCESSFUL in 1m 26s
+         android/app/build/outputs/apk/debug/app-debug.apk    5.31 MB
+
+     The contents of that .apk were unpacked and checked, not assumed:
+
+         538 files, including the whole web bundle under assets/public/
+         the API origin baked in reads https://phoenixx-os.onrender.com
+         no stale localhost URLs left anywhere in the bundle
+         package com.phoenixx.os, versionCode 1, versionName "1.0"
+         minSdk 24, targetSdk 36, and INTERNET is the only permission
+         launcher activity and adaptive icon both present
+         usesCleartextTraffic is in the DEBUG source set only - a release
+           build does not carry it
+
+     The only build warnings are three javac "unchecked or unsafe operations"
+     notes, all of them from Capacitor's own Plugin.java inside node_modules.
+     Not from this project, and not fixable from here. Ignore them.
+
+
+ NOT VERIFIED, because the toolchain or hardware was not available:
+
+     Nothing has run on a real phone or an emulator. The .apk builds and its
+     contents are correct, but it has not been installed and launched.
+
+     No RELEASE build has been made. Only the debug variant above. No signing
+     key exists yet - see SHIPPING TO THE PLAY STORE.
+
+     No iOS build has happened - that needs a Mac.
+
+     The GitHub Actions workflow has never actually executed on GitHub. Its
+     syntax is valid and the commands were rehearsed locally, but expect the
+     usual first-run adjustments any new CI pipeline needs.
+
+
+ ONE THING THAT IS DEFINITELY STILL OUTSTANDING:
+
+     The phone app cannot talk to the live server yet. The API currently
+     refuses requests from the app's address.
+
+     The fix is written and is correct - server/src/config.js lists
+     capacitor://localhost and http://localhost in corsOrigins - but it lives
+     on the mobile-capacitor branch, and Render deploys from main. So it is
+     NOT live. Merging is what ships it; Render redeploys automatically.
+
+     Until then an installed .apk will launch and render correctly and then
+     fail every API call. Test against the API on your own machine using the
+     LAN IP method described in "THE EVERYDAY LOOP".
+
+
+-------------------------------------------------------------------------------
+ WHERE TO READ MORE
+-------------------------------------------------------------------------------
+
+     README.md                    The same ground in more depth, including
+                                  exactly which shared files were changed and
+                                  why each one was necessary
+     ../phoenixx-os/HOW-TO-RUN.txt  Running the server and web app
+
+===============================================================================

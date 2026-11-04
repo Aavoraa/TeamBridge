@@ -1,0 +1,135 @@
+# Phoenixx OS on Render — one service serving the API and the web app.
+#
+# Everything the app needs lives in this one process: the SQLite database, the
+# chat SSE stream, the background job runner and the generated PDFs. That is why
+# there is a single service here and why it must stay at one instance — see
+# docs/DEPLOY.md for what would have to change to scale past that.
+#
+# This file must stay at the repo ROOT — Render only looks for render.yaml here.
+# The app itself lives in phoenixx-os/, which is what rootDir below points at.
+#
+# Deploy: push this repo to GitHub, then Render → New → Blueprint → pick the repo.
+
+services:
+  - type: web
+    name: phoenixx-os
+    runtime: node
+    # Every command below runs inside this directory, not the repo root.
+    rootDir: phoenixx-os
+    # FREE TIER. No persistent disk, and it sleeps after ~15 minutes idle, which
+    # destroys the container's filesystem along with the SQLite file.
+    #
+    # Data survives that because the database is snapshotted to Supabase Storage
+    # and restored on boot (SUPABASE_* below). That is a simulated disk, not a
+    # real one: a kill without SIGTERM loses up to SNAPSHOT_INTERVAL_MINUTES of
+    # writes, and it assumes exactly one instance — two would overwrite each
+    # other's snapshots. Do not scale this service out while that is the case.
+    #
+    # For a real disk: `plan: starter`, uncomment `disk:` below, point DB_FILE
+    # and STORAGE_DIR at /var/data, and turn SNAPSHOT_ENABLED off.
+    plan: free
+    # Closest to India. Free instances are not offered in every region — if
+    # Render rejects the blueprint, use `oregon` or `frankfurt`.
+    region: singapore
+    branch: main
+    # NODE_ENV=production (below) makes a plain `npm install` omit devDependencies,
+    # which is where typescript, vite and tailwind live — the build needs them.
+    # --include=dev overrides that; `ci` installs the lockfile exactly, so the
+    # build here matches a local one.
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/v1/health
+    autoDeploy: true
+
+    # Custom domain. Render still serves the default onrender.com hostname
+    # alongside this one, so the mobile builds already pointing there keep
+    # working; app.phoenixxedu.com is simply the address people are given.
+    #
+    # DNS, at your registrar: CNAME  app  ->  <service>.onrender.com
+    # Render issues and renews the TLS certificate once that record resolves.
+    domains:
+      - app.phoenixxedu.com
+
+    # --- Uncomment together with `plan: starter` to keep data between restarts.
+    # disk:
+    #   name: data
+    #   mountPath: /var/data
+    #   sizeGB: 1
+
+    envVars:
+      - key: NODE_VERSION
+        value: 22.13.0 # node:sqlite needs 22.5+; the app requires 22.13+
+      - key: NODE_ENV
+        value: production
+      - key: SERVE_WEB
+        value: 'true' # this process also serves web/dist — one origin, no CORS
+
+      # The public address of this deployment. Not cosmetic: WEB_BASE_URL is
+      # what builds the links that leave the building — client proposal share
+      # links (/p/:token) and team invite links (/accept-invite). Left unset it
+      # falls back to http://localhost:5173, and every invite you send points at
+      # the recipient's own machine.
+      - key: WEB_BASE_URL
+        value: https://app.phoenixxedu.com
+      - key: API_BASE_URL
+        value: https://app.phoenixxedu.com
+
+      # Generated once by Render and then held. Never commit real secrets.
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+
+      # Free tier: ephemeral disk, so seed the demo workspace on a cold start.
+      # With a disk attached, set these to /var/data/... and SEED_ON_BOOT false.
+      #
+      # SEED_ON_BOOT only fires when the database comes up empty AND no snapshot
+      # was restored, so with Supabase snapshots configured below it applies to
+      # the very first boot and never again. Once the workspace holds real data,
+      # setting it to false removes the demo fallback entirely.
+      - key: DB_FILE
+        value: ./data/phoenixx.db
+      - key: STORAGE_DIR
+        value: ./storage
+      - key: SEED_ON_BOOT
+        value: 'true'
+
+      # --- Supabase snapshots: durable storage on a host with no disk.
+      # The database is downloaded on boot, uploaded every few minutes and again
+      # on shutdown. See server/src/services/snapshot.js for what this does and
+      # does not guarantee. Both values below are set in the Render dashboard,
+      # never here: SUPABASE_SERVICE_KEY is the service-role key and grants full
+      # access to the bucket holding every tenant's data.
+      - key: SUPABASE_URL
+        sync: false # https://<project-ref>.supabase.co
+      - key: SUPABASE_SERVICE_KEY
+        sync: false # Supabase → Project Settings → API → service_role key
+      - key: SNAPSHOT_BUCKET
+        value: phoenixx-db
+      # Also the worst-case data loss if the instance is killed without SIGTERM.
+      - key: SNAPSHOT_INTERVAL_MINUTES
+        value: '5'
+      - key: SNAPSHOT_ENABLED
+        value: 'true'
+
+      # Background jobs: deadline ladder, digests, recurring invoices.
+      - key: JOBS_ENABLED
+        value: 'true'
+
+      # Notifications log to stdout until real provider credentials are set.
+      # Add WHATSAPP_TOKEN / SMTP_* in the Render dashboard, not here.
+      - key: WHATSAPP_PROVIDER
+        value: log
+      - key: EMAIL_PROVIDER
+        value: log
+
+      # Browser pop-ups (Web Push). Generate a pair once with
+      #   npx web-push generate-vapid-keys
+      # and paste both in the Render dashboard. Never commit them. Changing the
+      # pair later signs everyone out of pop-ups until they switch them on again.
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_SUBJECT
+        value: mailto:admin@phoenixxedu.com

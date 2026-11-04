@@ -1,0 +1,504 @@
+import PDFDocument from 'pdfkit';
+import fs from 'node:fs';
+import path from 'node:path';
+import { saveFile } from './storage.js';
+import { formatMoney, toMajor, uuid } from '../lib/util.js';
+
+/**
+ * Branded PDF output for invoices (F1), proposals (E5) and client-facing
+ * monthly reports (G2). Each document is drawn with the tenant's own colours
+ * and identity, which is what "branded per tenant visual identity" requires.
+ */
+
+const A4 = { width: 595.28, height: 841.89 };
+const M = 48;                       // page margin
+const INK = '#0F172A';
+const MUTED = '#64748B';
+const LINE = '#E2E8F0';
+
+function docFor(tenant, title) {
+  const doc = new PDFDocument({
+    size: 'A4',
+    margin: M,
+    bufferPages: true,
+    info: { Title: title, Author: tenant.name, Creator: 'Phoenixx OS' },
+  });
+  doc.registerFont('sans', 'Helvetica');
+  doc.registerFont('bold', 'Helvetica-Bold');
+  return doc;
+}
+
+/** Renders the document and stores it (see storage.js); resolves to its path. */
+function writeTo(doc, filename) {
+  const rel = `documents/${filename}`;
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    doc.on('data', (c) => chunks.push(c));
+    doc.on('error', reject);
+    doc.on('end', () => {
+      saveFile(rel, Buffer.concat(chunks), 'application/pdf').then(resolve, reject);
+    });
+    doc.end();
+  });
+}
+
+// --------------------------------------------------------------- primitives
+function header(doc, tenant, { title, subtitle, meta = [] }) {
+  const brand = tenant.brand_primary || '#1E40AF';
+
+  doc.rect(0, 0, A4.width, 6).fill(brand);
+
+  doc.fillColor(brand).font('bold').fontSize(18).text(tenant.name, M, 40);
+  doc.font('sans').fontSize(8.5).fillColor(MUTED);
+  const lines = [
+    tenant.address, [tenant.city, tenant.state_code && `State ${tenant.state_code}`].filter(Boolean).join(' · '),
+    tenant.gstin && `GSTIN: ${tenant.gstin}`,
+    [tenant.phone, tenant.email].filter(Boolean).join(' · '),
+  ].filter(Boolean);
+  doc.text(lines.join('\n'), M, 64, { width: 240, lineGap: 1.5 });
+
+  doc.font('bold').fontSize(22).fillColor(INK).text(title, A4.width / 2, 42, {
+    width: A4.width / 2 - M, align: 'right',
+  });
+  if (subtitle) {
+    doc.font('sans').fontSize(10).fillColor(MUTED)
+      .text(subtitle, A4.width / 2, 70, { width: A4.width / 2 - M, align: 'right' });
+  }
+
+  let y = subtitle ? 88 : 74;
+  doc.fontSize(9);
+  for (const [label, value] of meta) {
+    doc.fillColor(MUTED).font('sans').text(`${label}  `, A4.width / 2, y, { width: A4.width / 2 - M, align: 'right', continued: true });
+    doc.fillColor(INK).font('bold').text(String(value));
+    y += 14;
+  }
+
+  const bottom = Math.max(y + 6, 132);
+  doc.moveTo(M, bottom).lineTo(A4.width - M, bottom).lineWidth(1).strokeColor(LINE).stroke();
+  doc.y = bottom + 18;
+  return doc.y;
+}
+
+function sectionTitle(doc, text, y) {
+  doc.font('bold').fontSize(9).fillColor(MUTED).text(text.toUpperCase(), M, y, { characterSpacing: 0.8 });
+  return doc.y + 6;
+}
+
+/** Generic table renderer with page-break handling. */
+function table(doc, { columns, rows, y, accent = '#1E40AF', zebra = true }) {
+  const usable = A4.width - M * 2;
+  const widths = columns.map((c) => Math.round((c.width / 100) * usable));
+  let cursor = y;
+
+  const drawHead = () => {
+    doc.rect(M, cursor, usable, 22).fill(accent);
+    doc.font('bold').fontSize(8.5).fillColor('#FFFFFF');
+    let x = M;
+    columns.forEach((c, i) => {
+      doc.text(c.label.toUpperCase(), x + 6, cursor + 7, {
+        width: widths[i] - 12, align: c.align || 'left', lineBreak: false,
+      });
+      x += widths[i];
+    });
+    cursor += 22;
+  };
+  drawHead();
+
+  doc.font('sans').fontSize(9);
+  rows.forEach((row, idx) => {
+    const cells = columns.map((c, i) => String(c.value(row) ?? ''));
+    const heights = cells.map((txt, i) =>
+      doc.heightOfString(txt, { width: widths[i] - 12, align: columns[i].align || 'left' }));
+    const rowH = Math.max(20, Math.max(...heights) + 10);
+
+    if (cursor + rowH > A4.height - 90) {
+      doc.addPage();
+      cursor = M;
+      drawHead();
+      doc.font('sans').fontSize(9);
+    }
+    if (zebra && idx % 2 === 1) doc.rect(M, cursor, usable, rowH).fill('#F8FAFC');
+
+    let x = M;
+    cells.forEach((txt, i) => {
+      doc.fillColor(columns[i].strong ? INK : '#334155').font(columns[i].strong ? 'bold' : 'sans');
+      doc.text(txt, x + 6, cursor + 6, { width: widths[i] - 12, align: columns[i].align || 'left' });
+      x += widths[i];
+    });
+    cursor += rowH;
+    doc.moveTo(M, cursor).lineTo(A4.width - M, cursor).lineWidth(0.5).strokeColor(LINE).stroke();
+  });
+
+  return cursor;
+}
+
+function footer(doc, tenant, note) {
+  const range = doc.bufferedPageRange();
+  for (let i = 0; i < range.count; i++) {
+    doc.switchToPage(range.start + i);
+    doc.font('sans').fontSize(7.5).fillColor(MUTED);
+    doc.text(note || `${tenant.name} · generated by Phoenixx OS`, M, A4.height - 46, {
+      width: A4.width - M * 2, align: 'left', lineBreak: false,
+    });
+    doc.text(`Page ${i + 1} of ${range.count}`, M, A4.height - 46, {
+      width: A4.width - M * 2, align: 'right', lineBreak: false,
+    });
+  }
+}
+
+// ------------------------------------------------------------------ invoice
+export async function renderInvoicePdf({ tenant, invoice, items, client, payments = [] }) {
+  const doc = docFor(tenant, `Invoice ${invoice.number}`);
+  const money = (m) => formatMoney(m, invoice.currency, tenant.number_format);
+
+  let y = header(doc, tenant, {
+    title: 'TAX INVOICE',
+    meta: [
+      ['Invoice No', invoice.number],
+      ['Date', invoice.issue_date],
+      ['Due', invoice.due_date],
+      ...(invoice.place_of_supply ? [['Place of supply', invoice.place_of_supply]] : []),
+    ],
+  });
+
+  // Bill-to block
+  y = sectionTitle(doc, 'Bill to', y);
+  doc.font('bold').fontSize(11).fillColor(INK).text(client.legal_name || client.name, M, y);
+  doc.font('sans').fontSize(9).fillColor('#334155');
+  const billLines = [
+    client.address,
+    [client.city, client.state].filter(Boolean).join(', '),
+    client.gstin && `GSTIN: ${client.gstin}`,
+  ].filter(Boolean);
+  if (billLines.length) doc.text(billLines.join('\n'), { width: 280, lineGap: 1.5 });
+  y = doc.y + 16;
+
+  // Line items
+  const showIgst = invoice.igst_minor > 0;
+  const columns = [
+    { label: '#', width: 5, value: (_, i) => '', align: 'center' },
+    { label: 'Description', width: showIgst ? 34 : 30, value: (r) => r.description, strong: true },
+    { label: 'SAC', width: 10, value: (r) => r.hsn_sac || '-' },
+    { label: 'Qty', width: 7, value: (r) => String(r.qty), align: 'right' },
+    { label: 'Rate', width: 12, value: (r) => money(r.rate_minor), align: 'right' },
+    { label: 'Taxable', width: 13, value: (r) => money(r.taxable_minor), align: 'right' },
+    ...(showIgst
+      ? [{ label: `IGST`, width: 9, value: (r) => `${r.gst_rate}%`, align: 'right' },
+        { label: 'Amount', width: 10, value: (r) => money(r.amount_minor), align: 'right', strong: true }]
+      : [{ label: 'CGST', width: 8, value: (r) => money(r.cgst_minor), align: 'right' },
+        { label: 'SGST', width: 8, value: (r) => money(r.sgst_minor), align: 'right' },
+        { label: 'Amount', width: 11, value: (r) => money(r.amount_minor), align: 'right', strong: true }]),
+  ];
+  // number the rows
+  let n = 0;
+  columns[0].value = () => String(++n);
+
+  y = table(doc, { columns, rows: items, y, accent: tenant.brand_primary });
+
+  // Totals
+  const totals = [
+    ['Subtotal', money(invoice.subtotal_minor)],
+    ...(invoice.discount_minor ? [['Discount', `- ${money(invoice.discount_minor)}`]] : []),
+    ['Taxable value', money(invoice.taxable_minor)],
+    ...(invoice.cgst_minor ? [['CGST', money(invoice.cgst_minor)]] : []),
+    ...(invoice.sgst_minor ? [['SGST', money(invoice.sgst_minor)]] : []),
+    ...(invoice.igst_minor ? [['IGST', money(invoice.igst_minor)]] : []),
+    ...(invoice.round_off_minor ? [['Round off', money(invoice.round_off_minor)]] : []),
+  ];
+
+  let ty = y + 14;
+  const boxX = A4.width - M - 230;
+  doc.font('sans').fontSize(9.5);
+  for (const [label, value] of totals) {
+    doc.fillColor(MUTED).text(label, boxX, ty, { width: 130, align: 'right' });
+    doc.fillColor(INK).text(value, boxX + 135, ty, { width: 95, align: 'right' });
+    ty += 16;
+  }
+  doc.rect(boxX, ty + 2, 230, 30).fill(tenant.brand_primary || '#1E40AF');
+  doc.font('bold').fontSize(11).fillColor('#FFFFFF')
+    .text('Total', boxX + 8, ty + 11, { width: 120, align: 'left' })
+    .text(money(invoice.total_minor), boxX + 128, ty + 11, { width: 94, align: 'right' });
+  ty += 40;
+
+  if (invoice.paid_minor > 0) {
+    doc.font('sans').fontSize(9.5).fillColor(MUTED)
+      .text('Paid', boxX, ty, { width: 130, align: 'right' });
+    doc.fillColor('#16A34A').text(money(invoice.paid_minor), boxX + 135, ty, { width: 95, align: 'right' });
+    ty += 16;
+    doc.fillColor(MUTED).text('Balance due', boxX, ty, { width: 130, align: 'right' });
+    doc.font('bold').fillColor(invoice.balance_minor > 0 ? '#DC2626' : '#16A34A')
+      .text(money(invoice.balance_minor), boxX + 135, ty, { width: 95, align: 'right' });
+    ty += 18;
+  }
+
+  // Amount in words + notes
+  doc.font('sans').fontSize(9).fillColor(MUTED)
+    .text('Amount in words', M, y + 14, { width: 250 });
+  doc.font('bold').fontSize(9.5).fillColor(INK)
+    .text(`${amountInWords(toMajor(invoice.total_minor))} only`, M, doc.y, { width: 250 });
+
+  let ny = Math.max(ty, doc.y) + 20;
+  if (invoice.notes) {
+    ny = sectionTitle(doc, 'Notes', ny);
+    doc.font('sans').fontSize(9).fillColor('#334155').text(invoice.notes, M, ny, { width: A4.width - M * 2 });
+    ny = doc.y + 12;
+  }
+  if (invoice.terms) {
+    ny = sectionTitle(doc, 'Terms', ny);
+    doc.font('sans').fontSize(8.5).fillColor(MUTED).text(invoice.terms, M, ny, { width: A4.width - M * 2 });
+  }
+
+  if (payments.length) {
+    let py = doc.y + 16;
+    py = sectionTitle(doc, 'Payments received', py);
+    table(doc, {
+      y: py,
+      accent: '#64748B',
+      columns: [
+        { label: 'Date', width: 20, value: (p) => p.paid_at.slice(0, 10) },
+        { label: 'Method', width: 25, value: (p) => p.method || '-' },
+        { label: 'Reference', width: 35, value: (p) => p.reference || '-' },
+        { label: 'Amount', width: 20, value: (p) => money(p.amount_minor), align: 'right', strong: true },
+      ],
+      rows: payments,
+    });
+  }
+
+  footer(doc, tenant, `${tenant.name} · Invoice ${invoice.number} · This is a computer-generated invoice.`);
+  return writeTo(doc, `invoice-${invoice.number.replace(/[^\w-]/g, '_')}.pdf`);
+}
+
+// ----------------------------------------------------------------- proposal
+export async function renderProposalPdf({ tenant, proposal, items, client, sections = [] }) {
+  const doc = docFor(tenant, `Proposal ${proposal.number}`);
+  const money = (m) => formatMoney(m, proposal.currency, tenant.number_format);
+
+  let y = header(doc, tenant, {
+    title: 'PROPOSAL',
+    subtitle: proposal.title,
+    meta: [
+      ['Proposal No', proposal.number],
+      ['Prepared for', client.name],
+      ...(proposal.valid_until ? [['Valid until', proposal.valid_until]] : []),
+    ],
+  });
+
+  for (const s of sections) {
+    if (y > A4.height - 160) { doc.addPage(); y = M; }
+    y = sectionTitle(doc, s.heading, y);
+    doc.font('sans').fontSize(10).fillColor('#334155')
+      .text(s.body || '', M, y, { width: A4.width - M * 2, lineGap: 3, align: 'justify' });
+    y = doc.y + 18;
+  }
+
+  if (items.length) {
+    if (y > A4.height - 200) { doc.addPage(); y = M; }
+    y = sectionTitle(doc, 'Scope & investment', y);
+    y = table(doc, {
+      y,
+      accent: tenant.brand_primary,
+      columns: [
+        { label: 'Deliverable', width: 46, value: (r) => r.description, strong: true },
+        { label: 'Detail', width: 22, value: (r) => r.detail || '-' },
+        { label: 'Qty', width: 8, value: (r) => String(r.qty), align: 'right' },
+        { label: 'Rate', width: 12, value: (r) => money(r.rate_minor), align: 'right' },
+        { label: 'Amount', width: 12, value: (r) => money(r.amount_minor), align: 'right', strong: true },
+      ],
+      rows: items,
+    });
+
+    let ty = y + 14;
+    const boxX = A4.width - M - 230;
+    const rows = [
+      ['Subtotal', money(proposal.subtotal_minor)],
+      ...(proposal.discount_minor ? [['Discount', `- ${money(proposal.discount_minor)}`]] : []),
+      [`GST @ ${proposal.tax_rate}%`, money(proposal.tax_minor)],
+    ];
+    doc.font('sans').fontSize(9.5);
+    for (const [l, v] of rows) {
+      doc.fillColor(MUTED).text(l, boxX, ty, { width: 130, align: 'right' });
+      doc.fillColor(INK).text(v, boxX + 135, ty, { width: 95, align: 'right' });
+      ty += 16;
+    }
+    doc.rect(boxX, ty + 2, 230, 30).fill(tenant.brand_accent || '#F59E0B');
+    doc.font('bold').fontSize(11).fillColor('#1F2937')
+      .text('Total investment', boxX + 8, ty + 11, { width: 120 })
+      .text(money(proposal.total_minor), boxX + 128, ty + 11, { width: 94, align: 'right' });
+    y = ty + 46;
+  }
+
+  if (proposal.terms) {
+    if (y > A4.height - 140) { doc.addPage(); y = M; }
+    y = sectionTitle(doc, 'Terms & conditions', y);
+    doc.font('sans').fontSize(8.5).fillColor(MUTED)
+      .text(proposal.terms, M, y, { width: A4.width - M * 2, lineGap: 2 });
+    y = doc.y + 24;
+  }
+
+  // Acceptance block
+  if (y > A4.height - 130) { doc.addPage(); y = M; }
+  doc.rect(M, y, A4.width - M * 2, 74).lineWidth(1).strokeColor(LINE).stroke();
+  doc.font('bold').fontSize(10).fillColor(INK).text('Acceptance', M + 14, y + 12);
+  doc.font('sans').fontSize(9).fillColor(MUTED)
+    .text('Sign below or accept online using the secure link shared with this proposal.', M + 14, y + 28, { width: 340 });
+  doc.moveTo(M + 14, y + 60).lineTo(M + 220, y + 60).strokeColor('#94A3B8').stroke();
+  doc.moveTo(A4.width - M - 220, y + 60).lineTo(A4.width - M - 14, y + 60).stroke();
+  doc.fontSize(8).fillColor(MUTED)
+    .text('Authorised signatory', M + 14, y + 64)
+    .text('Date', A4.width - M - 220, y + 64);
+
+  footer(doc, tenant, `${tenant.name} · Proposal ${proposal.number}`);
+  return writeTo(doc, `proposal-${proposal.number.replace(/[^\w-]/g, '_')}.pdf`);
+}
+
+// ------------------------------------------------------------ client report
+export async function renderClientReportPdf({ tenant, client, report }) {
+  const doc = docFor(tenant, report.title);
+  const money = (m) => formatMoney(m, tenant.currency, tenant.number_format);
+  const p = report.payload;
+
+  let y = header(doc, tenant, {
+    title: 'MONTHLY REPORT',
+    subtitle: client.name,
+    meta: [['Period', p.period_label], ['Prepared', report.generated_at.slice(0, 10)]],
+  });
+
+  // Highlight tiles
+  const tiles = [
+    { label: 'Work delivered', value: `${p.delivered_count}` },
+    { label: 'Completion', value: `${p.completion_pct}%` },
+    { label: 'Meetings', value: `${p.meetings}` },
+    { label: 'Invoiced', value: money(p.invoiced_minor) },
+  ];
+  const tw = (A4.width - M * 2 - 3 * 10) / 4;
+  tiles.forEach((t, i) => {
+    const x = M + i * (tw + 10);
+    doc.roundedRect(x, y, tw, 58, 6).fill('#F1F5F9');
+    doc.font('sans').fontSize(8).fillColor(MUTED).text(t.label.toUpperCase(), x + 10, y + 12, { width: tw - 20, characterSpacing: 0.5 });
+    doc.font('bold').fontSize(16).fillColor(tenant.brand_primary || '#1E40AF').text(t.value, x + 10, y + 28, { width: tw - 20 });
+  });
+  y += 76;
+
+  if (p.summary) {
+    y = sectionTitle(doc, 'Summary', y);
+    doc.font('sans').fontSize(10).fillColor('#334155').text(p.summary, M, y, { width: A4.width - M * 2, lineGap: 3 });
+    y = doc.y + 18;
+  }
+
+  if (p.delivered?.length) {
+    y = sectionTitle(doc, 'Work delivered this month', y);
+    y = table(doc, {
+      y,
+      accent: tenant.brand_primary,
+      columns: [
+        { label: 'Deliverable', width: 52, value: (r) => r.title, strong: true },
+        { label: 'Category', width: 22, value: (r) => r.category || '-' },
+        { label: 'Completed', width: 26, value: (r) => (r.completed_at || '').slice(0, 10), align: 'right' },
+      ],
+      rows: p.delivered.slice(0, 25),
+    });
+    y += 18;
+  }
+
+  if (p.metrics?.length) {
+    if (y > A4.height - 180) { doc.addPage(); y = M; }
+    y = sectionTitle(doc, 'Key metrics', y);
+    y = table(doc, {
+      y,
+      accent: '#64748B',
+      columns: [
+        { label: 'Metric', width: 50, value: (r) => r.name, strong: true },
+        { label: 'Target', width: 25, value: (r) => String(r.target ?? '-'), align: 'right' },
+        { label: 'Actual', width: 25, value: (r) => String(r.actual ?? '-'), align: 'right' },
+      ],
+      rows: p.metrics,
+    });
+    y += 18;
+  }
+
+  if (p.next_month?.length) {
+    if (y > A4.height - 160) { doc.addPage(); y = M; }
+    y = sectionTitle(doc, 'Plan for next month', y);
+    doc.font('sans').fontSize(10).fillColor('#334155');
+    for (const item of p.next_month) {
+      doc.circle(M + 4, doc.y + 6, 2.2).fill(tenant.brand_accent || '#F59E0B');
+      doc.fillColor('#334155').text(item.title, M + 14, doc.y, { width: A4.width - M * 2 - 14 });
+      doc.moveDown(0.35);
+    }
+  }
+
+  footer(doc, tenant, `${tenant.name} · ${client.name} · ${p.period_label}`);
+  return writeTo(doc, `report-${client.name.replace(/[^\w-]/g, '_')}-${p.period}-${uuid().slice(0, 6)}.pdf`);
+}
+
+// ------------------------------------------------------- internal report pdf
+export async function renderInternalReportPdf({ tenant, report }) {
+  const doc = docFor(tenant, report.title);
+  const p = report.payload;
+
+  let y = header(doc, tenant, {
+    title: report.kind.toUpperCase().replace('_', ' '),
+    subtitle: report.title,
+    meta: [['Period', `${report.period_start} to ${report.period_end}`]],
+  });
+
+  for (const section of p.sections || []) {
+    if (y > A4.height - 180) { doc.addPage(); y = M; }
+    y = sectionTitle(doc, section.heading, y);
+
+    if (section.stats?.length) {
+      const tw = (A4.width - M * 2 - 3 * 10) / Math.min(4, section.stats.length);
+      section.stats.slice(0, 4).forEach((s, i) => {
+        const x = M + i * (tw + 10);
+        doc.roundedRect(x, y, tw, 52, 6).fill('#F1F5F9');
+        doc.font('sans').fontSize(7.5).fillColor(MUTED).text(String(s.label).toUpperCase(), x + 8, y + 10, { width: tw - 16 });
+        doc.font('bold').fontSize(14).fillColor(INK).text(String(s.value), x + 8, y + 24, { width: tw - 16 });
+      });
+      y += 66;
+    }
+    if (section.rows?.length && section.columns?.length) {
+      y = table(doc, {
+        y,
+        accent: tenant.brand_primary,
+        columns: section.columns.map((c) => ({ ...c, value: (r) => r[c.key] })),
+        rows: section.rows,
+      });
+      y += 16;
+    }
+    if (section.text) {
+      doc.font('sans').fontSize(9.5).fillColor('#334155').text(section.text, M, y, { width: A4.width - M * 2, lineGap: 2 });
+      y = doc.y + 16;
+    }
+  }
+
+  footer(doc, tenant);
+  return writeTo(doc, `report-${report.kind}-${report.period_start}-${uuid().slice(0, 6)}.pdf`);
+}
+
+// -------------------------------------------------------------- number words
+const ONES = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
+  'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+const TENS = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+const twoDigits = (n) => (n < 20 ? ONES[n] : `${TENS[Math.floor(n / 10)]}${n % 10 ? ` ${ONES[n % 10]}` : ''}`);
+
+/** Indian numbering (crore/lakh/thousand) as required on GST invoices. */
+export function amountInWords(amount) {
+  const rupees = Math.floor(Math.abs(amount));
+  const paise = Math.round((Math.abs(amount) - rupees) * 100);
+  if (rupees === 0 && paise === 0) return 'Zero Rupees';
+
+  const parts = [];
+  const push = (n, label) => { if (n) parts.push(`${twoDigits(n)}${label ? ` ${label}` : ''}`); };
+
+  push(Math.floor(rupees / 10_000_000), 'Crore');
+  push(Math.floor((rupees % 10_000_000) / 100_000), 'Lakh');
+  push(Math.floor((rupees % 100_000) / 1000), 'Thousand');
+  push(Math.floor((rupees % 1000) / 100), 'Hundred');
+  const rest = rupees % 100;
+  if (rest) { if (parts.length) parts.push('and'); parts.push(twoDigits(rest)); }
+
+  let out = `${amount < 0 ? 'Minus ' : ''}${parts.join(' ')} Rupees`;
+  if (paise) out += ` and ${twoDigits(paise)} Paise`;
+  return out;
+}

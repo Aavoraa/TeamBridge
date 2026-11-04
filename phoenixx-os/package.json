@@ -1,0 +1,29 @@
+{
+  "name": "phoenixx-os",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Phoenixx OS - Integrated Agency Operations & Tracking Suite (multi-tenant SaaS)",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,magenta \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "npm --workspace server run dev",
+    "dev:web": "npm --workspace web run dev",
+    "build": "npm --workspace web run build",
+    "seed": "npm --workspace server run seed",
+    "reset": "npm --workspace server run reset",
+    "test": "npm --workspace server run test",
+    "start": "npm --workspace server run start"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
+}
