@@ -83,14 +83,26 @@ async function pgBackend(url) {
   // and both apps reading it - still expects that.
   pg.types.setTypeParser(16, (v) => (v === null ? null : v === 't' ? 1 : 0));
 
-  const local = /@(localhost|127\.0\.0\.1)[:/]/.test(url);
+  /**
+   * TLS is decided here, not by the URL. node-postgres lets `sslmode=require`
+   * in a connection string (Neon and Supabase both hand those out) override the
+   * `ssl` option and turn it into full certificate verification, which
+   * Supabase's pooler certificate fails. So the SSL parameters are taken off
+   * the URL and the connection is always encrypted, except to a local server
+   * or when the URL explicitly says sslmode=disable.
+   */
+  const parsed = new URL(url);
+  const sslmode = parsed.searchParams.get('sslmode');
+  for (const k of ['sslmode', 'ssl', 'sslrootcert', 'sslcert', 'sslkey', 'uselibpqcompat']) parsed.searchParams.delete(k);
+  const local = ['localhost', '127.0.0.1', '::1'].includes(parsed.hostname);
   const pool = new pg.Pool({
-    connectionString: url,
-    // Serverless: each function instance holds a handful at most; Neon's
-    // pooled endpoint multiplexes them.
+    connectionString: parsed.toString(),
+    // Serverless: each function instance holds a handful at most; the
+    // provider's pooled endpoint multiplexes them.
     max: Number(process.env.PG_POOL_MAX || 5),
     idleTimeoutMillis: 10_000,
-    ssl: local || /sslmode=disable/.test(url) ? false : { rejectUnauthorized: false },
+    connectionTimeoutMillis: 15_000,
+    ssl: local || sslmode === 'disable' ? false : { rejectUnauthorized: false },
   });
   pool.on('error', (err) => console.error('[pg pool]', err.message));
   // Optional: confine this process to one schema of a shared database (the
