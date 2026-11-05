@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Plus, Users2, Download, Copy, KeyRound, Network, Trash2, Mail, ShieldCheck, PencilLine, FolderKanban,
 } from 'lucide-react';
 import { api } from '../lib/api';
+import JoinRequests, { InvitePeopleModal, usePendingJoinCount } from '../components/JoinRequests';
 import { useAuth } from '../lib/auth';
 import { date, money, percent, relative, titleCase } from '../lib/format';
 import {
@@ -25,10 +26,18 @@ const SEAT_TONES: Record<string, any> = {
 
 export default function Team() {
   const { can, user } = useAuth();
-  const [tab, setTab] = useState('list');
+  const [params, setParams] = useSearchParams();
+  const isOwner = user?.role === 'owner';
+  const [tab, setTabState] = useState(() => (params.get('tab') === 'requests' && isOwner ? 'requests' : 'list'));
+  const setTab = (id: string) => {
+    setTabState(id);
+    if (params.get('tab')) { params.delete('tab'); setParams(params, { replace: true }); }
+  };
+  const pendingJoins = usePendingJoinCount(isOwner);
   const [search, setSearch] = useState('');
   const [role, setRole] = useState('');
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
 
   const { data, isLoading, error, refetch } = useQuery({
@@ -58,8 +67,13 @@ export default function Team() {
               </Button>
             )}
             {can('users', 'create') && (
-              <Button variant="primary" icon={<Plus size={15} />} onClick={() => setInviteOpen(true)}>
+              <Button variant={isOwner ? 'secondary' : 'primary'} icon={<Plus size={15} />} onClick={() => setInviteOpen(true)}>
                 Add someone
+              </Button>
+            )}
+            {isOwner && (
+              <Button variant="primary" icon={<Mail size={15} />} onClick={() => setBulkOpen(true)}>
+                Invite people
               </Button>
             )}
           </>
@@ -69,6 +83,7 @@ export default function Team() {
             { id: 'list', label: 'Directory' },
             { id: 'org', label: 'Reporting structure' },
             ...(can('projects', 'view') ? [{ id: 'projects', label: 'Projects handled' }] : []),
+            ...(isOwner ? [{ id: 'requests', label: 'Invites & approvals', count: pendingJoins.data || undefined }] : []),
           ]} />
         }
       />
@@ -151,7 +166,10 @@ export default function Team() {
 
       {tab === 'projects' && <ProjectsHandled onSelect={setOpenId} />}
 
+      {tab === 'requests' && isOwner && <JoinRequests onInvite={() => setBulkOpen(true)} />}
+
       {inviteOpen && <InviteModal onClose={() => setInviteOpen(false)} />}
+      {bulkOpen && <InvitePeopleModal onClose={() => { setBulkOpen(false); setTab('requests'); }} />}
       {openId && <MemberDrawer id={openId} onClose={() => setOpenId(null)} />}
     </>
   );
@@ -295,7 +313,7 @@ function InviteModal({ onClose }: { onClose: () => void }) {
   });
   const [mode, setMode] = useState<'invite' | 'password'>('password');
   const [password, setPassword] = useState('');
-  const [created, setCreated] = useState<{ invite_url?: string; password?: string } | null>(null);
+  const [created, setCreated] = useState<{ invite_url?: string; password?: string; emailed?: boolean } | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const { data: meta } = useQuery({
@@ -329,10 +347,11 @@ function InviteModal({ onClose }: { onClose: () => void }) {
       setCreated({
         invite_url: res.data.invite_url,
         password: mode === 'password' ? password : undefined,
+        emailed: res.data.email_status === 'sent',
       });
       toast.success(mode === 'password'
         ? `${form.name.trim()} can sign in now.`
-        : 'Invitation created. Share the link below.');
+        : res.data.email_status === 'sent' ? 'Invitation emailed.' : 'Invitation created. Share the link below.');
       qc.invalidateQueries({ queryKey: ['team'] });
     },
     onError: (e: any) => {
@@ -364,7 +383,9 @@ function InviteModal({ onClose }: { onClose: () => void }) {
         title={isPassword ? 'Account created' : 'Invitation ready'}
         subtitle={isPassword
           ? `${form.email.trim().toLowerCase()} can sign in now`
-          : 'Share this link — it lets them set their own password'}
+          : created.emailed
+            ? `Emailed to ${form.email.trim().toLowerCase()}. You can also share the link yourself.`
+            : 'Share this link — it lets them set their own password'}
         footer={<Button variant="primary" onClick={onClose}>Done</Button>}>
         <div className="space-y-3">
           <Input readOnly value={secret} className="mono text-[12px]" onFocus={(e) => e.currentTarget.select()} />

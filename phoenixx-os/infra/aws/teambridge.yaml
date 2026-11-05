@@ -1,0 +1,432 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  TeamBridge on AWS - one EC2 server (Node app + web pages, HTTPS by Caddy),
+  a private RDS PostgreSQL database, private S3 buckets for recordings and
+  release bundles, and secrets in AWS Secrets Manager. Administered through
+  Systems Manager: no SSH port is open.
+
+Parameters:
+  DomainName:
+    Type: String
+    Description: The app's address, e.g. app.example.com (point a DNS A record at the output PublicIp).
+    AllowedPattern: '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$'
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: The VPC to use (the deploy script passes the region's default VPC).
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: At least two subnets in different zones of that VPC (for the database subnet group).
+  InstanceType:
+    Type: String
+    Default: t4g.micro          # 1 GB; a swap file covers installs. t4g.small if the team grows.
+    AllowedValues: [t4g.micro, t4g.small, t4g.medium]
+  DbInstanceClass:
+    Type: String
+    Default: db.t4g.micro
+    AllowedValues: [db.t4g.micro, db.t4g.small, db.t4g.medium]
+  DbStorageGb:
+    Type: Number
+    Default: 20
+    MinValue: 20
+    MaxValue: 500
+  DbBackupDays:
+    Type: Number
+    Default: 1                  # the AWS Free plan allows 1 day; raise to 7 after upgrading the plan
+    MinValue: 1
+    MaxValue: 35
+  BudgetEmail:
+    Type: String
+    Default: ''
+    Description: Email for the monthly cost alert (leave empty for no alert).
+  MonthlyBudgetUsd:
+    Type: Number
+    Default: 10
+    MinValue: 1
+    Description: Alert when this month's AWS spending is forecast to pass, or passes, this many US dollars.
+
+Conditions:
+  HasBudgetEmail: !Not [!Equals [!Ref BudgetEmail, '']]
+
+Resources:
+  # ---------------------------------------------------------------- cost alert
+  MonthlyBudget:
+    Type: AWS::Budgets::Budget
+    Condition: HasBudgetEmail
+    Properties:
+      Budget:
+        BudgetName: teambridge-monthly
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit: { Amount: !Ref MonthlyBudgetUsd, Unit: USD }
+      NotificationsWithSubscribers:
+        - Notification: { NotificationType: FORECASTED, ComparisonOperator: GREATER_THAN, Threshold: 100, ThresholdType: PERCENTAGE }
+          Subscribers: [{ SubscriptionType: EMAIL, Address: !Ref BudgetEmail }]
+        - Notification: { NotificationType: ACTUAL, ComparisonOperator: GREATER_THAN, Threshold: 80, ThresholdType: PERCENTAGE }
+          Subscribers: [{ SubscriptionType: EMAIL, Address: !Ref BudgetEmail }]
+
+  # ------------------------------------------------------------------ network
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: TeamBridge app - HTTP and HTTPS from anywhere, nothing else
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0 }
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0 }
+        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIpv6: '::/0' }
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIpv6: '::/0' }
+      Tags: [{ Key: Name, Value: teambridge-app }]
+
+  DbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: TeamBridge database - PostgreSQL from the app server only
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 5432, ToPort: 5432, SourceSecurityGroupId: !Ref AppSecurityGroup }
+      Tags: [{ Key: Name, Value: teambridge-db }]
+
+  # ----------------------------------------------------------------- database
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: TeamBridge database subnets
+      SubnetIds: !Ref SubnetIds
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: teambridge
+      Engine: postgres
+      EngineVersion: '17'
+      DBInstanceClass: !Ref DbInstanceClass
+      AllocatedStorage: !Ref DbStorageGb
+      StorageType: gp3
+      StorageEncrypted: true
+      DBName: teambridge
+      MasterUsername: teambridge
+      ManageMasterUserPassword: true        # AWS generates and keeps the password in Secrets Manager
+      PubliclyAccessible: false
+      DBSubnetGroupName: !Ref DbSubnetGroup
+      VPCSecurityGroups: [!Ref DbSecurityGroup]
+      BackupRetentionPeriod: !Ref DbBackupDays
+      PreferredBackupWindow: '20:30-21:00'  # 02:00-02:30 IST
+      DeletionProtection: true
+      AutoMinorVersionUpgrade: true
+      CopyTagsToSnapshot: true
+
+  # ------------------------------------------------------------------ storage
+  RecordingsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration: [{ ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 } }]
+      PublicAccessBlockConfiguration:
+        { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true }
+      OwnershipControls: { Rules: [{ ObjectOwnership: BucketOwnerEnforced }] }
+      CorsConfiguration:
+        CorsRules:
+          - { AllowedMethods: [GET, HEAD], AllowedOrigins: [!Sub 'https://${DomainName}'], AllowedHeaders: ['*'], MaxAge: 3600 }
+      LifecycleConfiguration:
+        Rules:
+          - { Id: abort-unfinished-uploads, Status: Enabled, AbortIncompleteMultipartUpload: { DaysAfterInitiation: 2 } }
+
+  ArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration: [{ ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 } }]
+      PublicAccessBlockConfiguration:
+        { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true }
+      OwnershipControls: { Rules: [{ ObjectOwnership: BucketOwnerEnforced }] }
+      LifecycleConfiguration:
+        Rules:
+          - { Id: old-releases, Status: Enabled, ExpirationInDays: 60 }
+
+  # LiveKit's recorder uploads to the bucket itself, so it needs keys of its
+  # own: this user can only write, read and delete under meetings/ in it.
+  RecorderUser:
+    Type: AWS::IAM::User
+    Properties:
+      Policies:
+        - PolicyName: recordings
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [s3:PutObject, s3:GetObject, s3:DeleteObject, s3:AbortMultipartUpload]
+                Resource: !Sub '${RecordingsBucket.Arn}/meetings/*'
+
+  RecorderKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName: !Ref RecorderUser
+
+  # ------------------------------------------------------------------ secrets
+  RecorderSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: teambridge/recorder
+      Description: S3 keys LiveKit uses to upload recordings (written by CloudFormation)
+      SecretString: !Sub '{"RECORDING_S3_ACCESS_KEY_ID":"${RecorderKey}","RECORDING_S3_SECRET_ACCESS_KEY":"${RecorderKey.SecretAccessKey}"}'
+
+  JwtAccessSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: teambridge/jwt-access
+      GenerateSecretString: { PasswordLength: 64, ExcludePunctuation: true }
+
+  JwtRefreshSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: teambridge/jwt-refresh
+      GenerateSecretString: { PasswordLength: 64, ExcludePunctuation: true }
+
+  # LiveKit, Gemini, Anthropic and other service keys. Starts empty; fill it
+  # with infra/aws/set-secrets.ps1 (it reads your server/.env).
+  IntegrationsSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: teambridge/integrations
+      Description: Third-party API keys for TeamBridge (filled by set-secrets.ps1)
+      SecretString: '{}'
+
+  # ------------------------------------------------------------------- server
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{ Effect: Allow, Principal: { Service: ec2.amazonaws.com }, Action: sts:AssumeRole }]
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: teambridge-runtime
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref RecorderSecret
+                  - !Ref JwtAccessSecret
+                  - !Ref JwtRefreshSecret
+                  - !Ref IntegrationsSecret
+                  - !GetAtt Database.MasterUserSecret.SecretArn
+              - Effect: Allow
+                Action: [s3:GetObject, s3:DeleteObject]
+                Resource: !Sub '${ArtifactsBucket.Arn}/*'
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref InstanceRole]
+
+  AppServer:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64}}'
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref InstanceProfile
+      SubnetId: !Select [0, !Ref SubnetIds]
+      SecurityGroupIds: [!Ref AppSecurityGroup]
+      MetadataOptions: { HttpTokens: required, HttpEndpoint: enabled }
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs: { VolumeSize: 30, VolumeType: gp3, Encrypted: true, DeleteOnTermination: true }
+      Tags: [{ Key: Name, Value: teambridge }]
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+          NODE_VERSION=v22.13.1
+          CADDY_VERSION=2.8.4
+
+          # 2 GB of swap: a 1 GB server needs room while npm installs a release
+          if [ ! -f /swapfile ]; then
+            dd if=/dev/zero of=/swapfile bs=1M count=2048
+            chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+            echo '/swapfile none swap sw 0 0' >> /etc/fstab
+          fi
+          dnf install -y tar gzip jq
+          # Node.js, the official build
+          curl -fsSL "https://nodejs.org/dist/$NODE_VERSION/node-$NODE_VERSION-linux-arm64.tar.xz" -o /tmp/node.tar.xz
+          mkdir -p /opt/node && tar -xJf /tmp/node.tar.xz -C /opt/node --strip-components=1
+          ln -sf /opt/node/bin/node /usr/local/bin/node
+          ln -sf /opt/node/bin/npm /usr/local/bin/npm
+          # Caddy, for HTTPS certificates from Let's Encrypt
+          curl -fsSL "https://github.com/caddyserver/caddy/releases/download/v${!CADDY_VERSION}/caddy_${!CADDY_VERSION}_linux_arm64.tar.gz" -o /tmp/caddy.tgz
+          tar -xzf /tmp/caddy.tgz -C /usr/local/bin caddy
+          setcap cap_net_bind_service=+ep /usr/local/bin/caddy
+
+          useradd --system --home /opt/teambridge --shell /sbin/nologin teambridge || true
+          useradd --system --home /var/lib/caddy --shell /sbin/nologin caddy || true
+          mkdir -p /opt/teambridge/releases /opt/teambridge/bin /etc/teambridge /var/lib/caddy /run/teambridge
+          chown -R caddy:caddy /var/lib/caddy
+
+          # ---- the app's settings, rebuilt from Secrets Manager at every start
+          cat > /opt/teambridge/bin/env.sh <<'ENVSH'
+          #!/bin/bash
+          set -euo pipefail
+          REGION=${AWS::Region}
+          sec() { aws secretsmanager get-secret-value --region "$REGION" --secret-id "$1" --query SecretString --output text; }
+          DB=$(sec '${Database.MasterUserSecret.SecretArn}')
+          DB_USER=$(echo "$DB" | jq -r .username)
+          DB_PASS=$(echo "$DB" | jq -r '.password | @uri')
+          REC=$(sec teambridge/recorder)
+          INT=$(sec teambridge/integrations)
+          OUT=/run/teambridge/app.env
+          mkdir -p /run/teambridge
+          umask 077
+          {
+            echo "NODE_ENV=production"
+            echo "PORT=4010"
+            echo "SERVE_WEB=true"
+            echo "NODE_OPTIONS=--max-old-space-size=448"
+            echo "WEB_DIST=/opt/teambridge/current/web/dist"
+            echo "WEB_BASE_URL=https://${DomainName}"
+            echo "API_BASE_URL=https://${DomainName}"
+            echo "DATABASE_URL=postgres://$DB_USER:$DB_PASS@${Database.Endpoint.Address}:${Database.Endpoint.Port}/teambridge?sslmode=require"
+            echo "JWT_ACCESS_SECRET=$(sec teambridge/jwt-access)"
+            echo "JWT_REFRESH_SECRET=$(sec teambridge/jwt-refresh)"
+            echo "RECORDING_S3_BUCKET=${RecordingsBucket}"
+            echo "RECORDING_S3_REGION=${AWS::Region}"
+            echo "RECORDING_S3_ACCESS_KEY_ID=$(echo "$REC" | jq -r .RECORDING_S3_ACCESS_KEY_ID)"
+            echo "RECORDING_S3_SECRET_ACCESS_KEY=$(echo "$REC" | jq -r .RECORDING_S3_SECRET_ACCESS_KEY)"
+            echo "$INT" | jq -r 'to_entries[] | select(.value != null and .value != "") | "\(.key)=\(.value)"'
+          } > "$OUT.tmp"
+          chown teambridge:teambridge "$OUT.tmp"
+          mv "$OUT.tmp" "$OUT"
+          ENVSH
+
+          # ---- install a release bundle from the artifacts bucket and switch to it
+          cat > /opt/teambridge/bin/deploy.sh <<'DEPLOYSH'
+          #!/bin/bash
+          set -euo pipefail
+          KEY="$1"
+          ID=$(date +%Y%m%d%H%M%S)
+          DIR=/opt/teambridge/releases/$ID
+          mkdir -p "$DIR"
+          aws s3 cp --region ${AWS::Region} "s3://${ArtifactsBucket}/$KEY" /tmp/release.tgz
+          tar -xzf /tmp/release.tgz -C "$DIR"
+          rm -f /tmp/release.tgz
+          cd "$DIR"
+          PATH=/opt/node/bin:$PATH npm ci --omit=dev --workspace server --include-workspace-root --no-audit --no-fund
+          chown -R teambridge:teambridge "$DIR"
+          ln -sfn "$DIR" /opt/teambridge/current
+          systemctl restart teambridge
+          sleep 4
+          systemctl is-active teambridge
+          curl -fsS http://127.0.0.1:4010/api/v1/health
+          # keep the last five releases
+          ls -1dt /opt/teambridge/releases/* | tail -n +6 | xargs -r rm -rf
+          echo "deployed $ID"
+          DEPLOYSH
+
+          # ---- run the clean setup with a team file from the artifacts bucket (one-time)
+          cat > /opt/teambridge/bin/bootstrap.sh <<'BOOTSH'
+          #!/bin/bash
+          set -euo pipefail
+          KEY="$1"
+          /opt/teambridge/bin/env.sh
+          aws s3 cp --region ${AWS::Region} "s3://${ArtifactsBucket}/$KEY" /run/teambridge/team.json
+          aws s3 rm --region ${AWS::Region} "s3://${ArtifactsBucket}/$KEY"
+          chown teambridge /run/teambridge/team.json
+          cd /opt/teambridge/current/server
+          set -a; . /run/teambridge/app.env; set +a
+          sudo -E -u teambridge /usr/local/bin/node src/bootstrap.js /run/teambridge/team.json
+          rm -f /run/teambridge/team.json
+          BOOTSH
+          chmod 700 /opt/teambridge/bin/*.sh
+
+          # Builds /run/teambridge/app.env from Secrets Manager. A separate unit because
+          # systemd reads EnvironmentFile before ExecStartPre would run. It is a oneshot
+          # without RemainAfterExit, so every (re)start of teambridge runs it again.
+          cat > /etc/systemd/system/teambridge-env.service <<'UNIT'
+          [Unit]
+          Description=TeamBridge settings from Secrets Manager
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=oneshot
+          ExecStart=/opt/teambridge/bin/env.sh
+          UNIT
+
+          cat > /etc/systemd/system/teambridge.service <<'UNIT'
+          [Unit]
+          Description=TeamBridge
+          After=network-online.target teambridge-env.service
+          Wants=network-online.target
+          Requires=teambridge-env.service
+
+          [Service]
+          User=teambridge
+          EnvironmentFile=/run/teambridge/app.env
+          WorkingDirectory=/opt/teambridge/current/server
+          ExecStart=/usr/local/bin/node src/index.js
+          Restart=always
+          RestartSec=5
+          LimitNOFILE=65536
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+
+          cat > /etc/caddy.Caddyfile <<'CADDY'
+          ${DomainName} {
+            encode zstd gzip
+            reverse_proxy 127.0.0.1:4010
+          }
+          CADDY
+          cat > /etc/systemd/system/caddy.service <<'UNIT'
+          [Unit]
+          Description=Caddy (HTTPS for TeamBridge)
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          User=caddy
+          Environment=XDG_DATA_HOME=/var/lib/caddy XDG_CONFIG_HOME=/var/lib/caddy
+          ExecStart=/usr/local/bin/caddy run --config /etc/caddy.Caddyfile --adapter caddyfile
+          ExecReload=/usr/local/bin/caddy reload --config /etc/caddy.Caddyfile --adapter caddyfile
+          Restart=always
+          AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+
+          systemctl daemon-reload
+          systemctl enable caddy teambridge
+          systemctl start caddy
+          # teambridge starts on the first deploy, once there is code to run
+
+  PublicAddress:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      InstanceId: !Ref AppServer
+      Tags: [{ Key: Name, Value: teambridge }]
+
+Outputs:
+  PublicIp:
+    Description: Point a DNS A record for your domain at this address.
+    Value: !Ref PublicAddress
+  AppUrl:
+    Value: !Sub 'https://${DomainName}'
+  InstanceId:
+    Value: !Ref AppServer
+  ArtifactsBucket:
+    Value: !Ref ArtifactsBucket
+  RecordingsBucket:
+    Value: !Ref RecordingsBucket
+  DatabaseEndpoint:
+    Value: !GetAtt Database.Endpoint.Address
+  LiveKitWebhookUrl:
+    Description: Set this as the webhook in LiveKit Cloud (Settings - Webhooks).
+    Value: !Sub 'https://${DomainName}/api/v1/livekit/webhook'

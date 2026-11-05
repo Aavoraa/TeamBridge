@@ -1,0 +1,34 @@
+{
+  "workspace": {
+    "name": "Your Company Name",
+    "city": "Coimbatore",
+    "timezone": "Asia/Kolkata",
+    "currency": "INR",
+    "plan": "scale"
+  },
+  "owner": {
+    "name": "Owner Name",
+    "email": "owner@yourcompany.com",
+    "phone": "+919800000000",
+    "designation": "Founder",
+    "department": "Leadership"
+  },
+  "users": [
+    {
+      "name": "A Manager",
+      "email": "manager@yourcompany.com",
+      "role": "manager",
+      "designation": "Delivery Manager",
+      "department": "Delivery",
+      "manager_email": "owner@yourcompany.com"
+    },
+    {
+      "name": "An Employee",
+      "email": "employee@yourcompany.com",
+      "role": "employee",
+      "designation": "Designer",
+      "department": "Delivery",
+      "manager_email": "manager@yourcompany.com"
+    }
+  ]
+}

@@ -384,6 +384,8 @@ const ADDED_COLUMNS = [
   // A part transcribed from one person's microphone already knows who spoke.
   ['ai_meeting_parts', 'speaker_label', 'TEXT'],
   ['ai_meeting_parts', 'speaker_user_id', 'TEXT'],
+  // Which personal invitation a join request came from (routes/join.routes.js).
+  ['join_requests', 'invite_id', 'TEXT'],
 ];
 
 

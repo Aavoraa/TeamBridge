@@ -15,3 +15,12 @@ web/tsconfig.tsbuildinfo
 .vercel
 # Local in-process PostgreSQL (PGlite)
 server/data/
+
+# Real team files hold people's names and emails - never commit them.
+team.json
+*.team.json
+server/team.json
+
+# production-only settings sent with infra/aws/set-secrets.ps1
+.env.email
+*.env.email

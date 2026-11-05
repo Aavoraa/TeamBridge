@@ -10,6 +10,7 @@ import { formatDue } from '../lib/dueTime.js';
 import { eligibleAssignees } from '../services/taskAssistant.js';
 import { createActionItem, validateTaskBody } from './actionItems.routes.js';
 import { intelScope } from '../services/liveMeetings.js';
+import { bookFollowUp, followUpsFor } from '../services/followUpMeetings.js';
 import {
   SOURCE_TYPE, RECORDING_EXT, TRANSCRIPT_EXT, MAX_PART_BYTES, MAX_PARTS, MAX_DOCUMENT_BYTES, MAX_CHUNK_BYTES,
   advanceMeeting, retryMeeting, applySpeakerMap, staffOf, speechConfigured, analysisConfigured, extOf,
@@ -240,6 +241,25 @@ router.post('/:id/advance', async (req, res) => {
   return ok(res, await detail(req, m.id));
 });
 
+/** Book a follow-up the AI found but could not date: the reviewer picks the day and time. */
+router.post('/:id/follow-ups/:fid/book', requires('meetings', 'create'), async (req, res) => {
+  const m = await meetingFor(req, req.params.id);
+  const body = validate(z.object({
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a date like 2026-11-20'),
+    time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use a time like 15:30'),
+  }), req.body);
+  const own = await get('SELECT id FROM ai_meeting_followups WHERE id = ? AND ai_meeting_id = ?', [req.params.fid, m.id]);
+  if (!own) throw notFound('Follow-up meeting');
+  const r = await bookFollowUp({
+    tenantId: req.auth.tenantId, followUpId: own.id, date: body.date, time: body.time,
+    actor: { userId: req.auth.userId, name: req.auth.name },
+  });
+  if (r.error === 'past') throw badRequest('That time has already passed - choose a time from now on');
+  if (r.error) throw badRequest('This follow-up is already on the calendar');
+  await audit(req, { entity: 'meeting', entityId: r.meeting_id, action: 'create', after: { follow_up_of: m.id } });
+  return ok(res, await detail(req, m.id));
+});
+
 router.post('/:id/retry', requires('meeting_intelligence', 'create'), async (req, res) => {
   const m = await meetingFor(req, req.params.id);
   if (m.status !== 'failed') throw badRequest('Only a failed meeting can be retried');
@@ -299,6 +319,7 @@ async function detail(req, id) {
       ? (await get('SELECT id FROM meetings WHERE ai_meeting_id = ? AND tenant_id = ?', [m.id, m.tenant_id]))?.id || null
       : null,
     extras: parse(m.extras_json, null),
+    follow_ups: await followUpsFor(m.id, m.tenant_id),
     transcript,
     speakers,
     speaker_labels: labels,

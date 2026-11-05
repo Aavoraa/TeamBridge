@@ -173,6 +173,50 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE UNIQUE INDEX IF NOT EXISTS ux_users_tenant_email ON users(tenant_id, email) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS ix_users_tenant ON users(tenant_id);
 
+-- People who created their account from a personal invitation. They are not
+-- users until an owner approves: kept apart so a pending applicant never gets
+-- role notifications, counts against seats, or can sign in.
+CREATE TABLE IF NOT EXISTS join_requests (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id),
+  name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  phone TEXT,
+  requested_role TEXT NOT NULL,            -- manager|employee|finance|hr
+  designation TEXT,
+  department TEXT,
+  password_hash TEXT NOT NULL,
+  security_question TEXT,
+  security_answer_hash TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',  -- pending|approved|rejected
+  decided_by TEXT REFERENCES users(id),
+  decided_at TEXT,
+  decision_note TEXT,
+  user_id TEXT REFERENCES users(id),       -- the account created on approval
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_join_requests_tenant ON join_requests(tenant_id, status);
+
+-- A personal invitation the owner sends to one email address. Its link lets
+-- that person create their own account (name, role, password), which then
+-- waits in join_requests for the owner's approval. One use per link.
+CREATE TABLE IF NOT EXISTS join_invites (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id),
+  email TEXT NOT NULL,
+  name TEXT,
+  token TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'sent',     -- sent|used|revoked
+  invited_by TEXT REFERENCES users(id),
+  request_id TEXT,                         -- the join request it turned into
+  used_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_join_invites_token ON join_invites(token);
+CREATE INDEX IF NOT EXISTS ix_join_invites_tenant ON join_invites(tenant_id, status);
+
 CREATE TABLE IF NOT EXISTS refresh_tokens (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id),
@@ -2020,6 +2064,55 @@ CREATE TABLE IF NOT EXISTS ai_meeting_items (
 );
 CREATE INDEX IF NOT EXISTS ix_aimi_meeting ON ai_meeting_items(meeting_id, idx);
 CREATE INDEX IF NOT EXISTS ix_aimi_status ON ai_meeting_items(tenant_id, status);
+
+-- The shared office calendar: events anyone in the workspace can add and edit
+-- (outings, trainings, deadlines, celebrations). Dates and times are
+-- workspace-local wall clock, like holidays.
+CREATE TABLE IF NOT EXISTS office_events (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id),
+  title TEXT NOT NULL,
+  description TEXT,
+  location TEXT,
+  category TEXT NOT NULL DEFAULT 'event',  -- event|deadline|training|celebration|reminder|other
+  all_day INTEGER NOT NULL DEFAULT 1,
+  start_date TEXT NOT NULL,                -- YYYY-MM-DD
+  end_date TEXT NOT NULL,                  -- YYYY-MM-DD, same as start for one day
+  start_time TEXT,                         -- HH:MM when not all day
+  end_time TEXT,
+  created_by TEXT REFERENCES users(id),
+  updated_by TEXT REFERENCES users(id),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_office_events_range ON office_events(tenant_id, start_date, end_date);
+
+-- A follow-up meeting the AI found in a transcript. With a date it is booked
+-- straight onto the calendar (meeting_id); without one it waits here as a
+-- suggestion. One row per follow-up; a re-analysis never books twice.
+CREATE TABLE IF NOT EXISTS ai_meeting_followups (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id),
+  ai_meeting_id TEXT NOT NULL REFERENCES ai_meetings(id),
+  idx INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  purpose TEXT,
+  when_text TEXT,                          -- as said ("next Tuesday at 3")
+  date TEXT,                               -- YYYY-MM-DD, workspace calendar
+  time TEXT,                               -- HH:MM
+  time_assumed INTEGER NOT NULL DEFAULT 0, -- a date was said but no time
+  duration_minutes INTEGER,
+  invitee_ids TEXT,                        -- JSON user ids
+  evidence_json TEXT,
+  confidence TEXT NOT NULL DEFAULT 'medium',
+  status TEXT NOT NULL,                    -- scheduled|needs_date|in_past|cancelled_in_meeting|not_scheduled
+  reason TEXT,                             -- why it was not booked
+  meeting_id TEXT REFERENCES meetings(id), -- the calendar meeting it became
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_aimf_meeting ON ai_meeting_followups(ai_meeting_id, idx);
 
 -- The last line of defence against a double approval: one proposed meeting
 -- task can become at most one action item, whatever races ahead of this.

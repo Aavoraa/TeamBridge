@@ -331,7 +331,7 @@ function UpcomingSchedule({ home }: { home: any }) {
         <span className="grid h-8 w-8 place-items-center rounded-lg text-[var(--info)]"><CalendarCheck size={22} strokeWidth={2} /></span>
         <h2 className="text-[19px] font-semibold tracking-[-0.02em] text-ink">Upcoming Schedule</h2>
         {can('meetings', 'view') && (
-          <Link to="/ai-meetings/upcoming" className="ml-auto inline-flex items-center gap-1.5 text-[14.5px] text-[var(--info)] hover:underline">View Calendar <ArrowRight size={15} /></Link>
+          <Link to="/calendar" className="ml-auto inline-flex items-center gap-1.5 text-[14.5px] text-[var(--info)] hover:underline">View Calendar <ArrowRight size={15} /></Link>
         )}
       </div>
       {meetings.isLoading ? <Skeleton className="mt-5 h-40" /> : !entries.length ? (

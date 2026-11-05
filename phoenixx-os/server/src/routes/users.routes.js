@@ -7,6 +7,7 @@ import { ok, created, validate, notFound, badRequest, conflict, forbidden, audit
 import { requires } from '../middleware/rbac.js';
 import { notifyMany } from '../services/notifications.js';
 import { config } from '../config.js';
+import { emailConfigured, inviteEmail, sendMail } from '../services/mailer.js';
 
 const router = Router();
 
@@ -84,6 +85,12 @@ router.get('/directory', async (req, res) => ok(res, await all(
     ORDER BY name`,
   [req.auth.tenantId],
 )));
+
+/** Whether invitations will be emailed (an SMTP server is set) or only shown as links. */
+router.get('/invite/email-status', requires('users', 'create'), async (req, res) => ok(res, {
+  email_configured: emailConfigured(),
+  from: emailConfigured() ? config.providers.smtp.from : null,
+}));
 
 router.get('/:id', requires('employees', 'view'), async (req, res) => {
   const user = await get(`${SELECT} WHERE u.id = ? AND u.tenant_id = ? AND u.deleted_at IS NULL`,
@@ -190,10 +197,12 @@ router.post('/', requires('users', 'create'), async (req, res) => {
     action: 'create',
     after: { email, role: body.role, onboarding: direct ? 'password set by admin' : 'invited' },
   });
+  const inviteUrl = inviteToken ? `${config.webBaseUrl}/accept-invite?token=${inviteToken}` : null;
+  const mail = inviteUrl ? await emailInvite(req, { name: body.name, email, role: body.role }, inviteUrl) : {};
   return created(res, {
     ...await get(`${SELECT} WHERE u.id = ?`, [id]),
-    ...(inviteToken
-      ? { invite_url: `${config.webBaseUrl}/accept-invite?token=${inviteToken}` }
+    ...(inviteUrl
+      ? { invite_url: inviteUrl, ...mail }
       : { note: 'The account is active. Share the password over a secure channel and ask them to change it after signing in.' }),
   });
 });
@@ -205,7 +214,139 @@ router.post('/:id/resend-invite', requires('users', 'edit'), async (req, res) =>
 
   const inviteToken = token(24);
   await run('UPDATE users SET invite_token = ?, updated_at = ? WHERE id = ?', [inviteToken, nowIso(), user.id]);
-  return ok(res, { invite_url: `${config.webBaseUrl}/accept-invite?token=${inviteToken}` });
+  const inviteUrl = `${config.webBaseUrl}/accept-invite?token=${inviteToken}`;
+  const mail = await emailInvite(req, user, inviteUrl);
+  return ok(res, { invite_url: inviteUrl, ...mail });
+});
+
+// ------------------------------------------------------------ invite emails
+/** Sends one invitation email. Returns { email_status, email_error }. */
+async function emailInvite(req, person, inviteUrl, ctx = null) {
+  if (!emailConfigured()) return { email_status: 'not_configured', email_error: null };
+  const c = ctx || await inviteContext(req);
+  const msg = inviteEmail({
+    name: person.name, workspace: c.workspace, invitedBy: c.inviter?.name,
+    role: titleCaseRole(person.role), url: inviteUrl,
+  });
+  const res = await sendMail({ to: person.email, ...msg, replyTo: c.inviter?.email });
+  return res.ok ? { email_status: 'sent', email_error: null } : { email_status: 'failed', email_error: res.error };
+}
+
+async function inviteContext(req) {
+  const [tenant, inviter] = await Promise.all([
+    get('SELECT name FROM tenants WHERE id = ?', [req.auth.tenantId]),
+    get('SELECT name, email FROM users WHERE id = ?', [req.auth.userId]),
+  ]);
+  return { workspace: tenant?.name || 'your team', inviter };
+}
+
+const createdRes = created;
+const titleCaseRole =(r) => ({ hr: 'HR' }[r] || (r ? r[0].toUpperCase() + r.slice(1) : ''));
+
+// ------------------------------------------------------------- bulk invite
+const bulkPersonSchema = z.object({
+  name: z.string().trim().min(2, 'Name needs at least 2 characters').max(120),
+  email: z.string().trim().toLowerCase().email('Not a valid email'),
+  role: z.enum(['manager', 'employee', 'finance', 'hr']).default('employee'),
+  designation: z.string().trim().max(120).optional().nullable(),
+  department: z.string().trim().max(80).optional().nullable(),
+  phone: z.string().trim().max(20).optional().nullable(),
+  manager_email: z.string().trim().toLowerCase().email('Manager email is not valid').optional().nullable()
+    .or(z.literal('').transform(() => null)),
+});
+const bulkSchema = z.object({
+  people: z.array(z.any()).min(1, 'Add at least one person').max(200, 'Up to 200 people at a time'),
+  send_email: z.boolean().default(true),
+});
+
+/**
+ * Invite many people at once. Rows are checked one by one: a bad row or an
+ * email already in the workspace is reported and skipped, the rest go through.
+ * Managers can be named by email - someone already here or someone in the
+ * same batch. Each new person gets their own one-time link, emailed when an
+ * SMTP server is configured; the links come back either way so they can be
+ * shared by hand.
+ */
+router.post('/bulk-invite', requires('users', 'create'), async (req, res) => {
+  const body = validate(bulkSchema, req.body);
+  const { tenantId } = req.auth;
+
+  const existing = new Map((await all(
+    'SELECT id, email FROM users WHERE tenant_id = ? AND deleted_at IS NULL', [tenantId],
+  )).map((u) => [u.email.toLowerCase(), u.id]));
+
+  const results = [];
+  const accepted = [];
+  const seen = new Set();
+  body.people.forEach((raw, i) => {
+    const parsed = bulkPersonSchema.safeParse(raw || {});
+    const email = String(raw?.email || '').trim().toLowerCase();
+    if (!parsed.success) {
+      results.push({ row: i + 1, email, name: raw?.name || '', status: 'skipped', reason: parsed.error.issues[0]?.message || 'Invalid row' });
+    } else if (existing.has(parsed.data.email)) {
+      results.push({ row: i + 1, email, name: parsed.data.name, status: 'skipped', reason: 'Already in this workspace' });
+    } else if (seen.has(parsed.data.email)) {
+      results.push({ row: i + 1, email, name: parsed.data.name, status: 'skipped', reason: 'Listed twice' });
+    } else {
+      seen.add(parsed.data.email);
+      accepted.push({ row: i + 1, id: uuid(), ...parsed.data });
+    }
+  });
+
+  // Seats: the whole batch has to fit, or be explicitly added as extra seats.
+  const seatCount = Number((await get(
+    "SELECT COUNT(*) AS n FROM users WHERE tenant_id = ? AND deleted_at IS NULL AND role != 'client' AND status != 'disabled'",
+    [tenantId],
+  ))?.n || 0);
+  const bandMax = req.subscription?.band_max_users;
+  if (bandMax && accepted.length && seatCount + accepted.length > bandMax && req.query.allow_addon !== 'true') {
+    throw badRequest(
+      `The ${req.subscription.plan_name} plan covers up to ${bandMax} users and you have ${seatCount}; this would add ${accepted.length}. Upgrade, or re-send with ?allow_addon=true to add per-user add-on seats.`,
+    );
+  }
+
+  const batchIds = new Map(accepted.map((p) => [p.email, p.id]));
+  const ctx = body.send_email ? await inviteContext(req) : null;
+  const created = []; // shadows the http helper inside this handler; see createdRes
+  for (const p of accepted) {
+    const inviteToken = token(24);
+    await run(
+      `INSERT INTO users (id, tenant_id, email, password_hash, name, phone, whatsapp, role, designation, department,
+         employment_type, status, invite_token, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [p.id, tenantId, p.email, bcrypt.hashSync(token(16), 10), p.name, p.phone || null, p.phone || null, p.role,
+        p.designation || null, p.department || null, 'full_time', 'invited', inviteToken, nowIso(), nowIso()],
+    );
+    await audit(req, { entity: 'user', entityId: p.id, action: 'create', after: { email: p.email, role: p.role, onboarding: 'bulk invite' } });
+    created.push({ p, inviteUrl: `${config.webBaseUrl}/accept-invite?token=${inviteToken}`, managerMissing: false });
+  }
+  // Second pass: a manager may be someone further down the same list.
+  for (const c of created) {
+    if (!c.p.manager_email) continue;
+    const managerId = existing.get(c.p.manager_email) || batchIds.get(c.p.manager_email) || null;
+    if (managerId && managerId !== c.p.id) {
+      await run('UPDATE users SET manager_id = ? WHERE id = ?', [managerId, c.p.id]);
+    } else c.managerMissing = true;
+  }
+
+  // Emails after every row is saved, so a slow mail server never leaves half a batch.
+  for (const { p, inviteUrl, managerMissing } of created) {
+    const mail = body.send_email ? await emailInvite(req, p, inviteUrl, ctx) : { email_status: 'not_sent', email_error: null };
+    results.push({
+      row: p.row, email: p.email, name: p.name, role: p.role, status: 'invited', invite_url: inviteUrl, ...mail,
+      reason: managerMissing ? `Manager ${p.manager_email} not found - set it later from Team` : null,
+    });
+  }
+
+  results.sort((a, b) => a.row - b.row);
+  const summary = {
+    invited: created.length,
+    skipped: results.filter((r) => r.status === 'skipped').length,
+    emailed: results.filter((r) => r.email_status === 'sent').length,
+    email_configured: emailConfigured(),
+    results,
+  };
+  return created.length ? createdRes(res, summary) : ok(res, summary);
 });
 
 // ------------------------------------------------------------------ update

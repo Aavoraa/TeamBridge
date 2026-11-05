@@ -2,6 +2,7 @@ import { config } from '../config.js';
 import { get, all, run } from '../db/index.js';
 import { uuid, nowIso, parseJson, renderTemplate } from '../lib/util.js';
 import webpush from 'web-push';
+import { sendMail } from './mailer.js';
 
 /**
  * Module B - multi-channel notifications.
@@ -76,10 +77,7 @@ const providers = {
   smtp: {
     id: 'smtp',
     async send({ to, subject, body }) {
-      // Intentionally not shipping an SMTP client: wire nodemailer here and the
-      // rest of the pipeline (templates, prefs, delivery log) is unchanged.
-      console.log(JSON.stringify({ t: nowIso(), notify: 'email(smtp-pending)', to, subject }));
-      return { ok: true, ref: null };
+      return sendMail({ to, subject, text: body });
     },
   },
 };
@@ -148,6 +146,14 @@ export const DEFAULT_TEMPLATES = {
   'meeting.invited': {
     subject: 'Meeting invitation: {{title}}',
     body: 'Hi {{user.name}}, {{host}} has invited you to "{{title}}" on {{when}} ({{duration}} min){{recurring}}. Open the meeting to accept or decline, and to join when it starts.',
+  },
+  'calendar.event_added': {
+    subject: 'On the office calendar: {{title}}',
+    body: '{{person}} added "{{title}}" to the office calendar for {{when}}.{{location}}',
+  },
+  'meeting.followup_scheduled': {
+    subject: 'Follow-up booked: {{title}}',
+    body: 'From "{{source}}": a follow-up meeting "{{title}}" was put on the calendar for {{when}} ({{duration}} min) with {{people}}.{{assumed}} Change or cancel it from the meeting page.',
   },
   'meeting.rescheduled': {
     subject: 'Meeting moved: {{title}}',
@@ -412,6 +418,10 @@ export const DEFAULT_TEMPLATES = {
   'mention.comment': {
     subject: '{{from}} mentioned you',
     body: '{{from}} mentioned you on {{entity}}: "{{excerpt}}"',
+  },
+  'team.join_request': {
+    subject: 'Join request: {{person}} ({{role}})',
+    body: '{{person}} ({{email}}) used the join link and asked to join as {{role}}{{designation}}. Approve or reject it on the Team page.',
   },
   'sop.published': {
     subject: 'SOP updated: {{title}} v{{version}}',

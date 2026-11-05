@@ -8,7 +8,37 @@ import { init } from './db/index.js';
 import { api } from './routes/index.js';
 import { requestLog, notFoundHandler, errorHandler } from './middleware/common.js';
 
+/**
+ * Outside origins the page itself talks to, for the CSP below. LiveKit: the
+ * browser opens the signal socket (wss) and first probes it over https; LiveKit
+ * Cloud then moves the session to a regional host, hence the wildcard. S3:
+ * recordings play from short-lived signed links straight from the bucket.
+ */
+export function externalSources(cfg = config) {
+  const live = [];
+  try {
+    if (cfg.livekit?.url) {
+      const u = new URL(cfg.livekit.url);
+      const ws = u.protocol === 'ws:' || u.protocol === 'http:' ? 'ws' : 'wss';
+      const http = ws === 'ws' ? 'http' : 'https';
+      live.push(`${ws}://${u.host}`, `${http}://${u.host}`);
+      if (u.hostname.endsWith('.livekit.cloud')) live.push('wss://*.livekit.cloud', 'https://*.livekit.cloud');
+    }
+  } catch { /* a malformed URL just means no extra sources */ }
+
+  const media = [];
+  const s3 = cfg.recordingStorage || {};
+  try {
+    if (s3.endpoint) media.push(new URL(s3.endpoint).origin);
+    else if (s3.bucket && s3.region) {
+      media.push(`https://${s3.bucket}.s3.${s3.region}.amazonaws.com`, `https://s3.${s3.region}.amazonaws.com`);
+    }
+  } catch { /* ignore */ }
+  return { live, media };
+}
+
 export async function createApp({ migrateOnBoot = true } = {}) {
+  const ext = externalSources();
   if (migrateOnBoot) await init();
 
   const app = express();
@@ -27,10 +57,15 @@ export async function createApp({ migrateOnBoot = true } = {}) {
         // React inline style props and the chart library both set element styles;
         // the two font families are loaded from Google Fonts by index.html.
         styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-        imgSrc: ["'self'", 'data:', 'blob:'],
+        imgSrc: ["'self'", 'data:', 'blob:', ...ext.media],
         fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com'],
-        // Same-origin XHR and the chat SSE stream; blob: for generated PDFs.
-        connectSrc: ["'self'", 'blob:'],
+        // Same-origin XHR and the chat SSE stream; blob: for generated PDFs;
+        // the LiveKit video service; recordings fetched from the bucket.
+        connectSrc: ["'self'", 'blob:', ...ext.live, ...ext.media],
+        // Meeting video/audio arrive as MediaStreams (no URL); recordings play from S3.
+        mediaSrc: ["'self'", 'blob:', 'data:', ...ext.media],
+        // livekit-client runs small helpers (audio processing) in blob: workers.
+        workerSrc: ["'self'", 'blob:'],
         objectSrc: ["'none'"],
         frameAncestors: ["'none'"],
         baseUri: ["'self'"],

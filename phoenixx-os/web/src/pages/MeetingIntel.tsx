@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  AlertCircle, ArrowLeft, AudioLines, Check, CheckCircle2, ChevronDown, Clock, FileText, Loader2, Pencil,
+  AlertCircle, ArrowLeft, AudioLines, CalendarClock, Check, CheckCircle2, ChevronDown, Clock, Copy, FileText, Loader2, Pencil,
   RotateCcw, ShieldCheck, Sparkles, Upload, UserRound, X, XCircle,
 } from 'lucide-react';
 import { api, ApiError, request } from '../lib/api';
@@ -463,7 +463,8 @@ function MeetingReview({ id }: { id: string }) {
             ))}
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
+          {/* Two columns only where the task list keeps room for its header and buttons. */}
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
             <div className="space-y-4 min-w-0">
               <Card>
                 <CardHeader title="Tasks proposed from this meeting"
@@ -506,8 +507,9 @@ function MeetingReview({ id }: { id: string }) {
             </div>
 
             <div className="space-y-4">
-              <Summary s={m.summary} />
-              <OpenItems x={m.extras} />
+              <Summary s={m.summary} title={m.title} />
+              <FollowUps m={m} onSaved={set} />
+              <OpenItems x={m.follow_ups?.length ? { ...m.extras, follow_up_meetings: [] } : m.extras} />
             </div>
           </div>
         </>
@@ -809,15 +811,55 @@ function Transcript({ segments, focus }: { segments: any[]; focus: number | null
   );
 }
 
-function Summary({ s }: { s: any }) {
+function Summary({ s, title }: { s: any; title?: string }) {
   const sections: [string, string[]][] = [
     ['Decisions', s.decisions], ['Conclusions', s.conclusions], ['Updates', s.updates], ['Problems', s.problems],
     ['Client discussions', s.client_discussions], ['Topics', s.topics],
   ];
   const people: any[] = s.participants || [];
+  const toast = useToast();
+  const [copied, setCopied] = useState(false);
+
+  /** The summary as plain text that pastes cleanly into WhatsApp, email or a doc. */
+  const asText = () => {
+    const out: string[] = [];
+    if (title) out.push(title, '');
+    if (s.overview) out.push(s.overview, '');
+    if (people.length) {
+      out.push('Participants', people.map((p) => `${p.name}${p.host ? ' (host)' : ''}${p.attended === false ? ' (did not join)' : ''}`).join(', '), '');
+    }
+    for (const [label, list] of sections) {
+      if (!list?.length) continue;
+      out.push(label, ...list.map((x) => `• ${x}`), '');
+    }
+    return out.join('\n').trim();
+  };
+  const copy = async () => {
+    const text = asText();
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Older browsers or a page without clipboard permission.
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    }
+    setCopied(true);
+    toast.success('Meeting summary copied.');
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   return (
     <Card>
-      <CardHeader title="Meeting summary" icon={<Sparkles size={15} className="text-[var(--brand)]" />} />
+      <CardHeader title="Meeting summary" icon={<Sparkles size={15} className="text-[var(--brand)]" />}
+        action={(
+          <Button size="sm" variant="ghost" onClick={copy} aria-label="Copy meeting summary"
+            icon={copied ? <Check size={14} className="text-[var(--positive)]" /> : <Copy size={14} />}>
+            {copied ? 'Copied' : 'Copy'}
+          </Button>
+        )} />
       <div className="p-4 space-y-3">
         {s.overview && <p className="text-[13.5px] text-ink leading-relaxed">{s.overview}</p>}
         {people.length > 0 && (
@@ -842,6 +884,89 @@ function Summary({ s }: { s: any }) {
         ))}
       </div>
     </Card>
+  );
+}
+
+/**
+ * Follow-up meetings the AI heard being agreed. With a day they are already on
+ * the calendar (invitations sent); without one they can be booked here.
+ */
+function FollowUps({ m, onSaved }: { m: any; onSaved: (d: any) => void }) {
+  const list: any[] = m.follow_ups || [];
+  if (!list.length) return null;
+  return (
+    <Card>
+      <CardHeader title="Follow-up meetings" icon={<CalendarClock size={15} className="text-[var(--brand)]" />}
+        subtitle="Found in the conversation. Ones with a day are already on the calendar and everyone was invited." />
+      <div className="divide-y divide-[var(--border)] border-t border-line">
+        {list.map((f) => <FollowUpRow key={f.id} f={f} meetingId={m.id} onSaved={onSaved} />)}
+      </div>
+    </Card>
+  );
+}
+
+function FollowUpRow({ f, meetingId, onSaved }: { f: any; meetingId: string; onSaved: (d: any) => void }) {
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [date, setDate] = useState('');
+  const [time, setTime] = useState('10:00');
+  const [busy, setBusy] = useState(false);
+  const booked = f.status === 'scheduled' && f.meeting_id;
+  const people = (f.people || []).map((p: any) => p.name).join(', ');
+
+  const book = async () => {
+    setBusy(true);
+    try {
+      const r: any = await api.post(`/meeting-intel/${meetingId}/follow-ups/${f.id}/book`, { date, time });
+      onSaved(r.data);
+      toast.success('Follow-up booked and everyone invited.');
+      setOpen(false);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="px-4 py-3 space-y-1.5">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-[13.5px] font-medium text-ink">{f.title}</p>
+        {booked ? (f.cancelled ? <Badge>Cancelled</Badge> : <Badge tone="positive" dot>On the calendar</Badge>)
+          : f.status === 'cancelled_in_meeting' ? <Badge>Called off</Badge>
+            : <Badge tone="warning">Not booked</Badge>}
+      </div>
+      {f.purpose && <p className="text-[12.5px] text-muted">{f.purpose}</p>}
+      {booked ? (
+        <p className="text-[12.5px] text-muted">
+          {f.scheduled_at ? dateTime(f.scheduled_at) : `${f.date} ${f.time}`} · {f.duration_minutes} min
+          {people && <> · {people}</>}
+          {f.time_assumed && <span className="block text-subtle">No time was said, so a time was picked for you. Change it if needed.</span>}
+        </p>
+      ) : (
+        <p className="text-[12.5px] text-subtle">
+          {f.when_text ? `Said: “${f.when_text}”. ` : ''}{f.reason}
+          {people && <span className="block">With {people}</span>}
+        </p>
+      )}
+      {f.quote && <p className="text-[12px] italic text-subtle">“{f.quote}”</p>}
+      <div className="flex flex-wrap items-end gap-2 pt-0.5">
+        {booked && (
+          <Link to={`/ai-meetings/m/${f.meeting_id}`} className="text-[12.5px] font-medium text-[var(--brand)] hover:underline">
+            Open meeting — change or cancel
+          </Link>
+        )}
+        {!booked && f.status !== 'cancelled_in_meeting' && !open && (
+          <Button size="sm" icon={<CalendarClock size={14} />} onClick={() => setOpen(true)}>Book it</Button>
+        )}
+        {open && (
+          <>
+            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-[150px]" aria-label="Date" />
+            <Input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="w-[110px]" aria-label="Time" />
+            <Button size="sm" variant="primary" loading={busy} disabled={!date || !time} onClick={book}>Book and invite</Button>
+            <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 

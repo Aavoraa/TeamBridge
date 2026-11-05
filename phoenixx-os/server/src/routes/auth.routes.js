@@ -130,6 +130,19 @@ router.post('/login', rateLimit({ max: 20, windowMs: 15 * 60_000 }), async (req,
     || '$2b$10$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidin';
   const valid = bcrypt.compareSync(password, hash);
 
+  if (!user) {
+    // Signed up through a join link but not approved yet: say so - only to
+    // someone who knows the password they chose, so nothing leaks to others.
+    const pending = await get(
+      `SELECT r.password_hash, t.name AS workspace FROM join_requests r JOIN tenants t ON t.id = r.tenant_id
+        WHERE r.email = ? AND r.status = 'pending' ORDER BY r.created_at DESC LIMIT 1`,
+      [email.toLowerCase()],
+    );
+    if (pending?.password_hash && bcrypt.compareSync(password, pending.password_hash)) {
+      throw new ApiError(403, 'pending_approval',
+        `Your request to join ${pending.workspace} is waiting for the owner's approval. You can sign in once it is approved.`);
+    }
+  }
   if (!user || !valid) throw unauthorized('Email or password is incorrect');
   if (user.status === 'disabled') throw forbidden('This account has been disabled');
 

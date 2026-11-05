@@ -67,6 +67,7 @@ type NavGroup = { label: string; icon: any } & ({ item: NavItem; children?: neve
  */
 const NAV: NavGroup[] = [
   { label: 'Dashboard', icon: House, item: { to: '/', label: 'Dashboard', exact: true } },
+  { label: 'Calendar', icon: CalendarDays, item: { to: '/calendar', label: 'Office calendar' } },
   { label: 'Projects', icon: FolderKanban, item: { to: '/projects', label: 'Projects', module: 'projects' } },
   {
     label: 'Tasks', icon: SquareCheckBig, children: [

@@ -7,6 +7,7 @@ import Layout from './components/Layout';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import AcceptInvite from './pages/AcceptInvite';
+import JoinWorkspace from './pages/JoinWorkspace';
 import Recover from './pages/Recover';
 import PublicProposal from './pages/PublicProposal';
 import Home from './pages/Home';
@@ -32,6 +33,7 @@ const Finance = lazy(() => import('./pages/Finance'));
 const Reimbursements = lazy(() => import('./pages/Reimbursements'));
 const HR = lazy(() => import('./pages/HR'));
 const Team = lazy(() => import('./pages/Team'));
+const OfficeCalendar = lazy(() => import('./pages/OfficeCalendar'));
 const SOP = lazy(() => import('./pages/SOP'));
 const SOPDetail = lazy(() => import('./pages/SOPDetail'));
 const Reports = lazy(() => import('./pages/Reports'));
@@ -77,6 +79,7 @@ export default function App() {
       {/* -------------------------------------------------------- public */}
       <Route path="/p/:token" element={<PublicProposal />} />
       <Route path="/accept-invite" element={<AcceptInvite />} />
+      <Route path="/join/:token" element={<JoinWorkspace />} />
       <Route path="/recover" element={<Recover />} />
       <Route path="/login" element={loading ? <FullPageSpinner /> : user ? <Navigate to="/" replace /> : <Login />} />
       <Route path="/signup" element={loading ? <FullPageSpinner /> : user ? <Navigate to="/" replace /> : <Signup />} />
@@ -135,6 +138,7 @@ export default function App() {
         <Route path="finance/reimbursements/:view" element={<Suspense fallback={<FullPageSpinner />}><Reimbursements /></Suspense>} />
         <Route path="hr" element={<Suspense fallback={<FullPageSpinner />}><HR /></Suspense>} />
         <Route path="team" element={<Suspense fallback={<FullPageSpinner />}><Team /></Suspense>} />
+        <Route path="calendar" element={<Suspense fallback={<FullPageSpinner />}><OfficeCalendar /></Suspense>} />
         <Route path="sop" element={<Suspense fallback={<FullPageSpinner />}><SOP /></Suspense>} />
         <Route path="sop/:id" element={<Suspense fallback={<FullPageSpinner />}><SOPDetail /></Suspense>} />
         <Route path="reports" element={<Suspense fallback={<FullPageSpinner />}><Reports /></Suspense>} />

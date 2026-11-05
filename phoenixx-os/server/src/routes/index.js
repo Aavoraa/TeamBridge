@@ -27,6 +27,8 @@ import { reportsRouter } from './reports.routes.js';
 import { dashboardRouter } from './dashboard.routes.js';
 import { settingsRouter } from './settings.routes.js';
 import { usersRouter } from './users.routes.js';
+import { publicJoinRouter, joinAdminRouter } from './join.routes.js';
+import { calendarRouter } from './calendar.routes.js';
 import { billingRouter } from './billing.routes.js';
 import { adminRouter } from './admin.routes.js';
 import { syncRouter, fileRouter } from './sync.routes.js';
@@ -104,6 +106,8 @@ api.use('/auth', authRouter);
 
 // E5 - proposal share links are deliberately unauthenticated.
 api.use('/public/proposals', rateLimit({ max: 120 }), publicProposalRouter);
+// Personal invitation links: the invitee creates their own account; the owner approves it.
+api.use('/public/join', rateLimit({ max: 30, windowMs: 15 * 60_000 }), publicJoinRouter);
 
 // ---------------------------------------------------------------- protected
 api.use(authenticate);
@@ -140,6 +144,8 @@ api.use('/reports', reportsRouter);
 api.use('/dashboard', dashboardRouter);
 api.use('/settings', settingsRouter);
 api.use('/users', usersRouter);
+api.use('/team-join', joinAdminRouter);
+api.use('/calendar', calendarRouter);
 api.use('/billing', billingRouter);
 api.use('/sync', syncRouter);
 api.use('/files', fileRouter);
