@@ -1932,6 +1932,18 @@ CREATE INDEX IF NOT EXISTS ix_push_user ON push_subscriptions(user_id);
 
 -- Phones running the app: one Firebase token per install. The token names the
 -- install, so whoever signed in on it last owns it; signing out removes it.
+-- What each built-in role may do in this workspace, as the owner set it in
+-- Settings > Roles: the whole module -> actions map for the role. No row means
+-- the built-in template (middleware/rbac.js ROLE_TEMPLATES) applies.
+CREATE TABLE IF NOT EXISTS role_access (
+  tenant_id TEXT NOT NULL REFERENCES tenants(id),
+  role TEXT NOT NULL,                       -- manager|employee|finance|hr
+  permissions TEXT NOT NULL,                -- JSON { module: [actions] }
+  updated_by TEXT REFERENCES users(id),
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (tenant_id, role)
+);
+
 CREATE TABLE IF NOT EXISTS native_push_devices (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL,

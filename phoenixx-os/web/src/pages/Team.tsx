@@ -5,6 +5,7 @@ import {
   Plus, Users2, Download, Copy, KeyRound, Network, Trash2, Mail, ShieldCheck, PencilLine, FolderKanban,
 } from 'lucide-react';
 import { api } from '../lib/api';
+import { ExtraAccess } from '../components/ExtraAccess';
 import JoinRequests, { InvitePeopleModal, usePendingJoinCount } from '../components/JoinRequests';
 import { useAuth } from '../lib/auth';
 import { date, money, percent, relative, titleCase } from '../lib/format';
@@ -30,12 +31,14 @@ export default function Team() {
   const isOwner = user?.role === 'owner';
   // The owner and HR invite people and approve their sign-ups (the API holds the same rule).
   const onboards = isOwner || user?.role === 'hr';
-  const [tab, setTabState] = useState(() => (params.get('tab') === 'requests' && onboards ? 'requests' : 'list'));
+  // Managers also approve sign-ups, for people joining as an employee.
+  const decidesJoins = onboards || user?.role === 'manager';
+  const [tab, setTabState] = useState(() => (params.get('tab') === 'requests' && decidesJoins ? 'requests' : 'list'));
   const setTab = (id: string) => {
     setTabState(id);
     if (params.get('tab')) { params.delete('tab'); setParams(params, { replace: true }); }
   };
-  const pendingJoins = usePendingJoinCount(onboards);
+  const pendingJoins = usePendingJoinCount(decidesJoins);
   const [search, setSearch] = useState('');
   const [role, setRole] = useState('');
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -85,7 +88,7 @@ export default function Team() {
             { id: 'list', label: 'Directory' },
             { id: 'org', label: 'Reporting structure' },
             ...(can('projects', 'view') ? [{ id: 'projects', label: 'Projects handled' }] : []),
-            ...(onboards ? [{ id: 'requests', label: 'Invites & approvals', count: pendingJoins.data || undefined }] : []),
+            ...(decidesJoins ? [{ id: 'requests', label: onboards ? 'Invites & approvals' : 'Approvals', count: pendingJoins.data || undefined }] : []),
           ]} />
         }
       />
@@ -168,7 +171,7 @@ export default function Team() {
 
       {tab === 'projects' && <ProjectsHandled onSelect={setOpenId} />}
 
-      {tab === 'requests' && onboards && <JoinRequests onInvite={() => setBulkOpen(true)} />}
+      {tab === 'requests' && decidesJoins && <JoinRequests onInvite={onboards ? () => setBulkOpen(true) : undefined} />}
 
       {inviteOpen && <InviteModal onClose={() => setInviteOpen(false)} />}
       {bulkOpen && <InvitePeopleModal onClose={() => { setBulkOpen(false); setTab('requests'); }} />}
@@ -600,7 +603,7 @@ function MemberDrawer({ id, onClose }: { id: string; onClose: () => void }) {
                 employment_type: u.employment_type || 'full_time', date_of_joining: u.date_of_joining || '', status: u.status || 'active',
               })}>Edit details</Button>
             )}
-            {can('users', 'edit') && (
+            {u.can_reset_password && (
               <Button icon={<KeyRound size={15} />} loading={resetPassword.isPending}
                 onClick={() => resetPassword.mutate()}>Reset password</Button>
             )}
@@ -722,6 +725,8 @@ function MemberDrawer({ id, onClose }: { id: string; onClose: () => void }) {
               </div>
             </div>
           )}
+
+          <ExtraAccess person={u} />
 
           {u.reports?.length > 0 && (
             <div>

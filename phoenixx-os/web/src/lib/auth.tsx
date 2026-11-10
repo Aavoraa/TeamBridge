@@ -34,6 +34,8 @@ type Permissions = Record<string, string[]>;
 
 interface Session {
   user: SessionUser;
+  /** On a marketing project's team: Marketing leads opens even without CRM access. */
+  on_marketing_project?: boolean;
   tenant: Tenant | null;
   subscription: Subscription | null;
   permissions: Permissions;

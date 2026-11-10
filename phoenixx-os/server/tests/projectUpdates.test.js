@@ -224,6 +224,8 @@ describe('reading the updates', () => {
 
   test('history is readable by the team and owners, not by outsiders', async () => {
     const outsider = await join('Rahul', 'rahul@pulse.test');
+    // Projects is not an employee's by default; the owner can open it to them.
+    await api.put(`/users/${priya.user.id}/access`, { extra: { projects: ['view'] } }, { token: ownerToken });
     assert.equal((await api.get(`/projects/${project.id}/updates`, { token: priya.token })).status, 200);
     assert.equal((await api.get(`/projects/${project.id}/updates`, { token: karthik.token })).status, 200);
     assert.equal((await api.get(`/projects/${project.id}/updates`, { token: outsider.token })).status, 403);

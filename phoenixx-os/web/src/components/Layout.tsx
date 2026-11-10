@@ -52,6 +52,8 @@ type NavItem = {
   exact?: boolean;
   badge?: BadgeKind;
   superAdmin?: boolean;
+  /** Also shown to someone on a marketing project's team, whatever their CRM access. */
+  marketingTeam?: boolean;
 };
 /** A top-level entry: a page of its own, or a section that opens to show its pages. */
 type NavGroup = { label: string; icon: any } & ({ item: NavItem; children?: never } | { item?: never; children: NavItem[] });
@@ -78,7 +80,7 @@ const NAV: NavGroup[] = [
       { to: '/clients', label: 'Clients', icon: Contact, module: 'crm' },
       { to: '/crm', label: 'Pipeline', icon: Users2, module: 'crm' },
       { to: '/proposals', label: 'Proposals', icon: FileText, module: 'proposals' },
-      { to: '/marketing', label: 'Marketing leads', icon: Megaphone, module: 'crm' },
+      { to: '/marketing', label: 'Marketing leads', icon: Megaphone, module: 'crm', marketingTeam: true },
     ],
   },
   {
@@ -177,7 +179,7 @@ export default function Layout() {
 export function Sidebar({ open: drawerOpen, onClose, drawerOnly }: {
   open: boolean; onClose: () => void; drawerOnly?: boolean;
 }) {
-  const { user, subscription, can, signOut } = useAuth();
+  const { user, subscription, can, signOut, on_marketing_project: onMarketing } = useAuth() as ReturnType<typeof useAuth> & { on_marketing_project?: boolean };
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -227,7 +229,8 @@ export function Sidebar({ open: drawerOpen, onClose, drawerOnly }: {
   const isSuperAdmin = user?.role === 'super_admin';
   // The same permission the API enforces decides whether an entry is drawn.
   // Hiding it is a courtesy; the server refuses the call either way.
-  const visible = (item: NavItem) => (item.superAdmin ? isSuperAdmin : !item.module || can(item.module, item.action || 'view'));
+  const visible = (item: NavItem) => (item.superAdmin ? isSuperAdmin
+    : !item.module || can(item.module, item.action || 'view') || (!!item.marketingTeam && !!onMarketing));
 
   // Which sections are open: the one holding the current page always is.
   const [open, setOpen] = useState<Record<string, boolean>>(() => { try { return JSON.parse(store.get('tb.nav.open') || '{}'); } catch { return {}; } });

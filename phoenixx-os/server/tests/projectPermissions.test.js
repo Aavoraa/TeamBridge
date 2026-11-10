@@ -48,7 +48,39 @@ before(async () => {
     { user_id: priya.user.id, seat: 'senior' }, { token: ownerToken });
 });
 
-describe('an employee has read-only access to projects and teams', () => {
+describe('Projects and CRM are not given to employees by default', () => {
+  test('an employee is refused both, and is told so in their permissions', async () => {
+    assert.equal((await api.get('/projects', { token: rahul.token })).status, 403);
+    assert.equal((await api.get('/crm/clients', { token: rahul.token })).status, 403);
+    const perms = (await api.get('/auth/me', { token: rahul.token })).body.data.permissions;
+    assert.deepEqual([perms.projects, perms.crm, perms.proposals], [[], [], []]);
+  });
+
+  test('an employee seated as a project lead gets Projects automatically', async () => {
+    const lead = await join('Lata', 'lata@delivery.test');
+    assert.equal((await api.get('/projects', { token: lead.token })).status, 403);
+    const theirs = (await api.post('/projects',
+      { client_id: client.id, name: 'Lata leads this', lead_id: lead.user.id }, { token: ownerToken })).body.data;
+    assert.equal((await api.get(`/projects/${theirs.id}`, { token: lead.token })).status, 200);
+    assert.equal((await api.patch(`/projects/${theirs.id}`, { name: 'x' }, { token: lead.token })).status, 403, 'still read-only');
+    assert.equal((await api.del(`/projects/${theirs.id}`, { token: ownerToken })).status, 200);
+  });
+
+  test('only the owner opens an area to one person', async () => {
+    assert.equal((await api.put(`/users/${rahul.user.id}/access`, { extra: { crm: ['view'] } }, { token: divya.token })).status, 403);
+    assert.equal((await api.put(`/users/${divya.user.id}/access`, { extra: { platform: ['view'] } }, { token: ownerToken })).status, 400);
+  });
+});
+
+describe('an employee given Projects (and CRM) by the owner has read-only access to projects', () => {
+  before(async () => {
+    for (const who of [priya, rahul]) {
+      const res = await api.put(`/users/${who.user.id}/access`,
+        { extra: { projects: ['view'], crm: ['view', 'create', 'edit'] } }, { token: ownerToken });
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+    }
+  });
+
   test('they can list projects, open one, and see who is on the team', async () => {
     const list = await api.get('/projects', { token: priya.token });
     assert.equal(list.status, 200);

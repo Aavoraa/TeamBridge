@@ -10,6 +10,7 @@ import AcceptInvite from './pages/AcceptInvite';
 import JoinWorkspace from './pages/JoinWorkspace';
 import Recover from './pages/Recover';
 import PublicProposal from './pages/PublicProposal';
+import { NeedAccess } from './components/NeedAccess';
 import { usePhonePushLinks } from './lib/phonePush';
 import Home from './pages/Home';
 
@@ -107,49 +108,49 @@ export default function App() {
         <Route index element={isNative ? <Navigate to="/m" replace /> : <Home />} />
         {/* The dashboard itself, for the installed app, where "/" is the phone home screen. */}
         <Route path="overview" element={<Home />} />
-        <Route path="dashboard" element={<Suspense fallback={<FullPageSpinner />}><Dashboard /></Suspense>} />
-        <Route path="action-items" element={<Suspense fallback={<FullPageSpinner />}><ActionItems /></Suspense>} />
-        <Route path="action-items/:id" element={<Suspense fallback={<FullPageSpinner />}><ActionItems /></Suspense>} />
-        <Route path="meetings" element={<Suspense fallback={<FullPageSpinner />}><Meetings /></Suspense>} />
-        <Route path="meetings/:id" element={<Suspense fallback={<FullPageSpinner />}><Meetings /></Suspense>} />
-        <Route path="ai-meetings" element={<Suspense fallback={<FullPageSpinner />}><AiMeetings /></Suspense>} />
-        <Route path="ai-meetings/schedule" element={<Suspense fallback={<FullPageSpinner />}><AiMeetings /></Suspense>} />
-        <Route path="ai-meetings/join" element={<Suspense fallback={<FullPageSpinner />}><AiMeetings /></Suspense>} />
-        <Route path="ai-meetings/upcoming" element={<Suspense fallback={<FullPageSpinner />}><AiMeetings /></Suspense>} />
-        <Route path="ai-meetings/history" element={<Suspense fallback={<FullPageSpinner />}><AiMeetings /></Suspense>} />
-        <Route path="ai-meetings/m/:id" element={<Suspense fallback={<FullPageSpinner />}><AiMeetings /></Suspense>} />
-        <Route path="ai-meetings/j/:token" element={<Suspense fallback={<FullPageSpinner />}><AiMeetings /></Suspense>} />
-        <Route path="meeting-intel" element={<Suspense fallback={<FullPageSpinner />}><MeetingIntel /></Suspense>} />
-        <Route path="meeting-intel/:id" element={<Suspense fallback={<FullPageSpinner />}><MeetingIntel /></Suspense>} />
-        <Route path="deadlines" element={<Suspense fallback={<FullPageSpinner />}><Deadlines /></Suspense>} />
-        <Route path="chat" element={<Suspense fallback={<FullPageSpinner />}><Chat /></Suspense>} />
-        <Route path="clients" element={<Suspense fallback={<FullPageSpinner />}><Clients /></Suspense>} />
-        <Route path="crm" element={<Suspense fallback={<FullPageSpinner />}><CRM /></Suspense>} />
-        <Route path="crm/:id" element={<Suspense fallback={<FullPageSpinner />}><ClientDetail /></Suspense>} />
-        <Route path="proposals" element={<Suspense fallback={<FullPageSpinner />}><Proposals /></Suspense>} />
-        <Route path="projects" element={<Suspense fallback={<FullPageSpinner />}><Projects /></Suspense>} />
-        <Route path="projects/:id" element={<Suspense fallback={<FullPageSpinner />}><Projects /></Suspense>} />
-        <Route path="marketing" element={<Suspense fallback={<FullPageSpinner />}><Marketing /></Suspense>} />
-        <Route path="marketing/:projectId" element={<Suspense fallback={<FullPageSpinner />}><Marketing /></Suspense>} />
-        <Route path="proposals/:id" element={<Suspense fallback={<FullPageSpinner />}><Proposals /></Suspense>} />
-        <Route path="invoices" element={<Suspense fallback={<FullPageSpinner />}><Invoices /></Suspense>} />
-        <Route path="invoices/:id" element={<Suspense fallback={<FullPageSpinner />}><InvoiceDetail /></Suspense>} />
-        <Route path="finance" element={<Suspense fallback={<FullPageSpinner />}><Finance /></Suspense>} />
+        <Route path="dashboard" element={<NeedAccess module="dashboard"><Suspense fallback={<FullPageSpinner />}><Dashboard /></Suspense></NeedAccess>} />
+        <Route path="action-items" element={<NeedAccess module="action_items"><Suspense fallback={<FullPageSpinner />}><ActionItems /></Suspense></NeedAccess>} />
+        <Route path="action-items/:id" element={<NeedAccess module="action_items"><Suspense fallback={<FullPageSpinner />}><ActionItems /></Suspense></NeedAccess>} />
+        <Route path="meetings" element={<NeedAccess module="meetings"><Suspense fallback={<FullPageSpinner />}><Meetings /></Suspense></NeedAccess>} />
+        <Route path="meetings/:id" element={<NeedAccess module="meetings"><Suspense fallback={<FullPageSpinner />}><Meetings /></Suspense></NeedAccess>} />
+        <Route path="ai-meetings" element={<NeedAccess module="meetings"><Suspense fallback={<FullPageSpinner />}><AiMeetings /></Suspense></NeedAccess>} />
+        <Route path="ai-meetings/schedule" element={<NeedAccess module="meetings"><Suspense fallback={<FullPageSpinner />}><AiMeetings /></Suspense></NeedAccess>} />
+        <Route path="ai-meetings/join" element={<NeedAccess module="meetings"><Suspense fallback={<FullPageSpinner />}><AiMeetings /></Suspense></NeedAccess>} />
+        <Route path="ai-meetings/upcoming" element={<NeedAccess module="meetings"><Suspense fallback={<FullPageSpinner />}><AiMeetings /></Suspense></NeedAccess>} />
+        <Route path="ai-meetings/history" element={<NeedAccess module="meetings"><Suspense fallback={<FullPageSpinner />}><AiMeetings /></Suspense></NeedAccess>} />
+        <Route path="ai-meetings/m/:id" element={<NeedAccess module="meetings"><Suspense fallback={<FullPageSpinner />}><AiMeetings /></Suspense></NeedAccess>} />
+        <Route path="ai-meetings/j/:token" element={<NeedAccess module="meetings"><Suspense fallback={<FullPageSpinner />}><AiMeetings /></Suspense></NeedAccess>} />
+        <Route path="meeting-intel" element={<NeedAccess module="meeting_intelligence"><Suspense fallback={<FullPageSpinner />}><MeetingIntel /></Suspense></NeedAccess>} />
+        <Route path="meeting-intel/:id" element={<NeedAccess module="meeting_intelligence"><Suspense fallback={<FullPageSpinner />}><MeetingIntel /></Suspense></NeedAccess>} />
+        <Route path="deadlines" element={<NeedAccess module="deadlines"><Suspense fallback={<FullPageSpinner />}><Deadlines /></Suspense></NeedAccess>} />
+        <Route path="chat" element={<NeedAccess module="chat"><Suspense fallback={<FullPageSpinner />}><Chat /></Suspense></NeedAccess>} />
+        <Route path="clients" element={<NeedAccess module="crm"><Suspense fallback={<FullPageSpinner />}><Clients /></Suspense></NeedAccess>} />
+        <Route path="crm" element={<NeedAccess module="crm"><Suspense fallback={<FullPageSpinner />}><CRM /></Suspense></NeedAccess>} />
+        <Route path="crm/:id" element={<NeedAccess module="crm"><Suspense fallback={<FullPageSpinner />}><ClientDetail /></Suspense></NeedAccess>} />
+        <Route path="proposals" element={<NeedAccess module="proposals"><Suspense fallback={<FullPageSpinner />}><Proposals /></Suspense></NeedAccess>} />
+        <Route path="projects" element={<NeedAccess module="projects"><Suspense fallback={<FullPageSpinner />}><Projects /></Suspense></NeedAccess>} />
+        <Route path="projects/:id" element={<NeedAccess module="projects"><Suspense fallback={<FullPageSpinner />}><Projects /></Suspense></NeedAccess>} />
+        <Route path="marketing" element={<NeedAccess module="crm" marketingTeam><Suspense fallback={<FullPageSpinner />}><Marketing /></Suspense></NeedAccess>} />
+        <Route path="marketing/:projectId" element={<NeedAccess module="crm" marketingTeam><Suspense fallback={<FullPageSpinner />}><Marketing /></Suspense></NeedAccess>} />
+        <Route path="proposals/:id" element={<NeedAccess module="proposals"><Suspense fallback={<FullPageSpinner />}><Proposals /></Suspense></NeedAccess>} />
+        <Route path="invoices" element={<NeedAccess module="invoices"><Suspense fallback={<FullPageSpinner />}><Invoices /></Suspense></NeedAccess>} />
+        <Route path="invoices/:id" element={<NeedAccess module="invoices"><Suspense fallback={<FullPageSpinner />}><InvoiceDetail /></Suspense></NeedAccess>} />
+        <Route path="finance" element={<NeedAccess module="costs"><Suspense fallback={<FullPageSpinner />}><Finance /></Suspense></NeedAccess>} />
         {/* The Finance module's own views. Each left-nav entry lands on one of
             them, and the page falls back to "mine" for a role that cannot use
             the one asked for. */}
-        <Route path="finance/reimbursements" element={<Suspense fallback={<FullPageSpinner />}><Reimbursements /></Suspense>} />
-        <Route path="finance/reimbursements/:view" element={<Suspense fallback={<FullPageSpinner />}><Reimbursements /></Suspense>} />
-        <Route path="hr" element={<Suspense fallback={<FullPageSpinner />}><HR /></Suspense>} />
-        <Route path="team" element={<Suspense fallback={<FullPageSpinner />}><Team /></Suspense>} />
+        <Route path="finance/reimbursements" element={<NeedAccess module="reimbursements"><Suspense fallback={<FullPageSpinner />}><Reimbursements /></Suspense></NeedAccess>} />
+        <Route path="finance/reimbursements/:view" element={<NeedAccess module="reimbursements"><Suspense fallback={<FullPageSpinner />}><Reimbursements /></Suspense></NeedAccess>} />
+        <Route path="hr" element={<NeedAccess module="hr_attendance"><Suspense fallback={<FullPageSpinner />}><HR /></Suspense></NeedAccess>} />
+        <Route path="team" element={<NeedAccess module="employees"><Suspense fallback={<FullPageSpinner />}><Team /></Suspense></NeedAccess>} />
         <Route path="calendar" element={<Suspense fallback={<FullPageSpinner />}><OfficeCalendar /></Suspense>} />
-        <Route path="sop" element={<Suspense fallback={<FullPageSpinner />}><SOP /></Suspense>} />
-        <Route path="sop/:id" element={<Suspense fallback={<FullPageSpinner />}><SOPDetail /></Suspense>} />
-        <Route path="reports" element={<Suspense fallback={<FullPageSpinner />}><Reports /></Suspense>} />
-        <Route path="reports/:id" element={<Suspense fallback={<FullPageSpinner />}><ReportDetail /></Suspense>} />
+        <Route path="sop" element={<NeedAccess module="sop"><Suspense fallback={<FullPageSpinner />}><SOP /></Suspense></NeedAccess>} />
+        <Route path="sop/:id" element={<NeedAccess module="sop"><Suspense fallback={<FullPageSpinner />}><SOPDetail /></Suspense></NeedAccess>} />
+        <Route path="reports" element={<NeedAccess module="reports"><Suspense fallback={<FullPageSpinner />}><Reports /></Suspense></NeedAccess>} />
+        <Route path="reports/:id" element={<NeedAccess module="reports"><Suspense fallback={<FullPageSpinner />}><ReportDetail /></Suspense></NeedAccess>} />
         <Route path="notifications" element={<Suspense fallback={<FullPageSpinner />}><Notifications /></Suspense>} />
-        <Route path="settings" element={<Suspense fallback={<FullPageSpinner />}><Settings /></Suspense>} />
-        <Route path="billing" element={<Suspense fallback={<FullPageSpinner />}><Billing /></Suspense>} />
+        <Route path="settings" element={<NeedAccess module="settings"><Suspense fallback={<FullPageSpinner />}><Settings /></Suspense></NeedAccess>} />
+        <Route path="billing" element={<NeedAccess module="billing"><Suspense fallback={<FullPageSpinner />}><Billing /></Suspense></NeedAccess>} />
         <Route path="profile" element={<Suspense fallback={<FullPageSpinner />}><Profile /></Suspense>} />
         <Route path="admin" element={<Suspense fallback={<FullPageSpinner />}><Admin /></Suspense>} />
       </Route>

@@ -23,6 +23,8 @@ import {
 const JOIN_ROLES = ['manager', 'employee', 'finance', 'hr'];
 /** Who invites people and approves their sign-ups. */
 const ONBOARDERS = ['owner', 'hr'];
+/** Managers also decide sign-ups, but only for people joining as an employee. */
+const DECIDERS = [...ONBOARDERS, 'manager'];
 const ROLE_LABEL = { manager: 'Manager', employee: 'Employee', finance: 'Finance', hr: 'HR' };
 
 const joinUrl = (t) => `${config.webBaseUrl}/join/${t}`;
@@ -96,7 +98,7 @@ publicJoinRouter.post('/:token', async (req, res) => {
 
   await notifyRole({
     tenantId: inv.tenant_id,
-    roles: ONBOARDERS,
+    roles: body.role === 'employee' ? DECIDERS : ONBOARDERS,
     eventKey: 'team.join_request',
     channels: ['in_app', 'email'],
     link: '/team?tab=requests',
@@ -118,6 +120,15 @@ export const joinAdminRouter = Router();
  */
 function onboardersOnly(req) {
   if (!ONBOARDERS.includes(req.auth.role)) throw forbidden('Only the workspace owner or HR can invite people and approve them');
+}
+
+/** Who decides sign-ups: the owner and HR for any role, a manager for employees. */
+function decidersOnly(req) {
+  if (!DECIDERS.includes(req.auth.role)) throw forbidden('Only the owner, HR or a manager can approve people joining');
+}
+const MANAGER_LIMIT = 'A manager approves people joining as an employee. The owner or HR decides Manager, Finance and HR roles.';
+function managerMayDecide(req, ...roles) {
+  if (req.auth.role === 'manager' && roles.some((r) => r && r !== 'employee')) throw forbidden(MANAGER_LIMIT);
 }
 
 async function sendInviteEmail(req, invite) {
@@ -240,18 +251,20 @@ joinAdminRouter.post('/invites/:id/revoke', async (req, res) => {
 
 // ---------------------------------------------------------------- requests
 joinAdminRouter.get('/requests', async (req, res) => {
-  onboardersOnly(req);
+  decidersOnly(req);
   const status = ['pending', 'approved', 'rejected'].includes(req.query.status) ? req.query.status : 'pending';
+  // A manager sees only the employee sign-ups, the ones they can decide.
+  const onlyEmployees = req.auth.role === 'manager' ? " AND r.requested_role = 'employee'" : '';
   const rows = await all(
     `SELECT r.id, r.name, r.email, r.phone, r.requested_role, r.designation, r.department, r.status,
             r.decision_note, r.decided_at, r.created_at, r.user_id, d.name AS decided_by_name
        FROM join_requests r LEFT JOIN users d ON d.id = r.decided_by
-      WHERE r.tenant_id = ? AND r.status = ?
+      WHERE r.tenant_id = ? AND r.status = ?${onlyEmployees}
       ORDER BY r.created_at DESC LIMIT 200`,
     [req.auth.tenantId, status],
   );
   const pending = Number((await get(
-    "SELECT COUNT(*) AS n FROM join_requests WHERE tenant_id = ? AND status = 'pending'", [req.auth.tenantId],
+    `SELECT COUNT(*) AS n FROM join_requests r WHERE r.tenant_id = ? AND r.status = 'pending'${onlyEmployees}`, [req.auth.tenantId],
   ))?.n || 0);
   return ok(res, rows, { pending });
 });
@@ -271,10 +284,13 @@ const approveSchema = z.object({
 });
 
 joinAdminRouter.post('/requests/:id/approve', async (req, res) => {
-  onboardersOnly(req);
+  decidersOnly(req);
   const r = await pendingRequest(req);
   const body = validate(approveSchema, req.body || {});
   const { tenantId } = req.auth;
+  managerMayDecide(req, r.requested_role, body.role);
+  // A manager who approves someone becomes their manager unless they pick another.
+  if (req.auth.role === 'manager' && !body.manager_id) body.manager_id = req.auth.userId;
 
   if (await get('SELECT id FROM users WHERE email = ? AND deleted_at IS NULL', [r.email])) {
     throw conflict('Someone with this email already has an account. Reject this request instead.');
@@ -334,8 +350,9 @@ joinAdminRouter.post('/requests/:id/approve', async (req, res) => {
 });
 
 joinAdminRouter.post('/requests/:id/reject', async (req, res) => {
-  onboardersOnly(req);
+  decidersOnly(req);
   const r = await pendingRequest(req);
+  managerMayDecide(req, r.requested_role);
   const body = validate(z.object({ note: z.string().trim().max(300).optional().nullable() }), req.body || {});
   const ts = nowIso();
   await run(

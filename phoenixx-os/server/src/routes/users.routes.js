@@ -4,7 +4,9 @@ import { z } from 'zod';
 import { get, all, run, repo } from '../db/index.js';
 import { uuid, nowIso, token, parseJson, toCsv, pct, monthIso, startOfMonth, endOfMonth } from '../lib/util.js';
 import { ok, created, validate, notFound, badRequest, conflict, forbidden, audit, paginate, pageMeta } from '../lib/http.js';
-import { requires } from '../middleware/rbac.js';
+import {
+  requires, can, MODULES, ACTIONS, normaliseAccess, roleAccess, permissionMatrix, invalidatePersonAccess,
+} from '../middleware/rbac.js';
 import { notifyMany } from '../services/notifications.js';
 import { config } from '../config.js';
 import { emailConfigured, inviteEmail, sendMail } from '../services/mailer.js';
@@ -12,6 +14,25 @@ import { emailConfigured, inviteEmail, sendMail } from '../services/mailer.js';
 const router = Router();
 
 const ROLES = ['owner', 'manager', 'employee', 'finance', 'hr', 'client'];
+
+/**
+ * Who may reset whose password. Passwords are stored one-way, so nobody can
+ * read one back - a reset hands out a fresh temporary password instead.
+ *  - Nobody resets their own here; they change it in their profile.
+ *  - The owner resets anyone in the workspace.
+ *  - HR (with Team edit access) resets anyone except the owner, so HR can
+ *    never take over the owner's account.
+ *  - A manager resets the people who report to them, except owners and HR.
+ */
+async function canResetPassword(auth, target) {
+  if (!target || target.id === auth.userId) return false;
+  if (target.role === 'super_admin') return false;
+  if (auth.role === 'owner' || auth.role === 'super_admin') return true;
+  if (target.role === 'owner') return false;
+  if (auth.role === 'hr') return can(auth, 'users', 'edit');
+  if (auth.role === 'manager') return target.manager_id === auth.userId && !['hr', 'client'].includes(target.role);
+  return false;
+}
 
 const userSchema = z.object({
   name: z.string().min(2).max(120),
@@ -108,8 +129,17 @@ router.get('/:id', requires('employees', 'view'), async (req, res) => {
   ) || {};
 
   const canSeeCost = ['owner', 'finance', 'hr', 'super_admin'].includes(req.auth.role);
+  const extra = normaliseAccess(parseJson((await get('SELECT extra_access FROM users WHERE id = ?', [user.id]))?.extra_access, {}));
   return ok(res, {
     ...(canSeeCost ? user : { ...user, monthly_cost_minor: undefined }),
+    /** What their role gives, what the owner added for them, and the two together (Team > person). */
+    access: {
+      role: normaliseAccess(await roleAccess(req.auth.tenantId, user.role)),
+      extra: Object.fromEntries(Object.entries(extra).filter(([, a]) => a.length)),
+      effective: await permissionMatrix({ userId: user.id, tenantId: req.auth.tenantId, role: user.role, customRoleId: user.custom_role_id }),
+      editable: ['manager', 'employee', 'finance', 'hr'].includes(user.role),
+    },
+    can_reset_password: await canResetPassword(req.auth, user),
     reports: await all("SELECT id, name, role, designation, avatar_url FROM users WHERE manager_id = ? AND deleted_at IS NULL AND status = 'active'",
       [user.id]),
     this_month: {
@@ -141,6 +171,29 @@ router.get('/:id', requires('employees', 'view'), async (req, res) => {
       [req.auth.tenantId, user.id],
     ),
   });
+});
+
+/**
+ * Extra access for one person, on top of their role - say, Clients & pipeline
+ * for the one employee who does business development. The owner decides.
+ */
+router.put('/:id/access', async (req, res) => {
+  if (!['owner', 'super_admin'].includes(req.auth.role)) throw forbidden('Only the workspace owner gives someone extra access');
+  const target = await get('SELECT id, role FROM users WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL', [req.params.id, req.auth.tenantId]);
+  if (!target) throw notFound('User');
+  if (!['manager', 'employee', 'finance', 'hr'].includes(target.role)) throw badRequest('Owners already have everything, and portal users keep their fixed access');
+  const { extra } = validate(z.object({ extra: z.record(z.string(), z.array(z.string())) }), req.body);
+  for (const [mod, actions] of Object.entries(extra)) {
+    if (!MODULES.includes(mod) || mod === 'platform') throw badRequest(`Unknown area "${mod}"`);
+    if (actions.some((a) => !ACTIONS.includes(a))) throw badRequest(`Unknown action on ${mod}`);
+  }
+  const clean = Object.fromEntries(Object.entries(normaliseAccess(extra)).filter(([m, a]) => a.length && m !== 'notifications'));
+  const before = (await get('SELECT extra_access FROM users WHERE id = ?', [target.id]))?.extra_access || null;
+  await run('UPDATE users SET extra_access = ?, updated_at = ? WHERE id = ?',
+    [Object.keys(clean).length ? JSON.stringify(clean) : null, nowIso(), target.id]);
+  invalidatePersonAccess(target.id);
+  await audit(req, { entity: 'user_access', entityId: target.id, action: 'update', before: parseJson(before, {}), after: clean });
+  return ok(res, { extra: clean });
 });
 
 // -------------------------------------------------------------- add a member
@@ -404,10 +457,16 @@ router.delete('/:id', requires('users', 'delete'), async (req, res) => {
 });
 
 /** Admin-initiated password reset - forces a change on next sign-in. */
-router.post('/:id/reset-password', requires('users', 'edit'), async (req, res) => {
+router.post('/:id/reset-password', async (req, res) => {
   const user = await get('SELECT * FROM users WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL',
     [req.params.id, req.auth.tenantId]);
   if (!user) throw notFound('User');
+  if (user.id === req.auth.userId) throw badRequest('Change your own password from your profile.');
+  if (!await canResetPassword(req.auth, user)) {
+    throw forbidden(req.auth.role === 'manager'
+      ? 'Managers can reset passwords only for the people who report to them'
+      : "You can't reset this person's password");
+  }
 
   const temp = token(9);
   await run('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?',

@@ -4,7 +4,7 @@ import { useMutation } from '@tanstack/react-query';
 import { ArrowRight, ArrowLeft, ShieldQuestion, Check, Lock } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { Logo } from '../components/Logo';
-import { Button, Field, Input, cx } from '../components/ui';
+import { Button, Field, Input, cx, PasswordInput } from '../components/ui';
 
 /**
  * Password recovery by security question. Three requests, in this order:
@@ -197,12 +197,12 @@ export default function Recover() {
                 {step === 'password' && (
                   <>
                     <Field label="New password" required hint="At least 8 characters">
-                      <Input type="password" value={password} autoFocus autoComplete="new-password"
+                      <PasswordInput value={password} autoFocus autoComplete="new-password"
                         onChange={(e) => { setPassword(e.target.value); setError(''); }} />
                     </Field>
                     <Field label="Confirm new password" required
                       error={mismatch ? 'The passwords do not match' : undefined}>
-                      <Input type="password" value={confirm} autoComplete="new-password"
+                      <PasswordInput value={confirm} autoComplete="new-password"
                         onChange={(e) => setConfirm(e.target.value)} />
                     </Field>
                   </>

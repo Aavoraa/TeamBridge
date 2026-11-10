@@ -84,11 +84,13 @@ export const ROLE_TEMPLATES = {
     employees: RO,
     sop: RO,
     kpi: RO,
-    crm: RW,
-    proposals: RW,
-    // Read-only on projects and teams: an employee sees what they are on and
-    // who else is, but cannot create, edit, restaff or delete a project.
-    projects: RO,
+    // Clients, pipeline, proposals and projects are not an employee's by
+    // default. The owner opens them to one person (Team > person > extra
+    // access), and an employee seated as a project's lead or manager keeps
+    // Projects automatically so they can run it and file its daily update.
+    crm: [],
+    proposals: [],
+    projects: [],
     invoices: [],
     costs: [],
     profitability: [],
@@ -192,21 +194,93 @@ export const ROLE_SCOPE = {
   client: 'client',
 };
 
-const permsCache = new Map();
+/** The roles whose access the workspace owner can change (Settings > Roles). */
+export const EDITABLE_ROLES = ['manager', 'employee', 'finance', 'hr'];
 
+/** Every role keeps these: the bell, and nobody but the platform team gets the platform console. */
+export function normaliseAccess(perms) {
+  const out = {};
+  for (const m of MODULES) {
+    let actions = [...new Set((perms?.[m] || []).filter((a) => ACTIONS.includes(a)))];
+    if (actions.length && !actions.includes('view')) actions.unshift('view'); // doing anything needs seeing it
+    if (m === 'notifications' && !actions.includes('view')) actions.unshift('view');
+    if (m === 'platform') actions = [];
+    out[m] = ACTIONS.filter((a) => actions.includes(a));
+  }
+  return out;
+}
+
+const permsCache = new Map();
+const accessCache = new Map(); // `${tenantId}:${role}` -> the owner's map, or null for the template
+
+/** The role's access in this workspace: what the owner set, else the built-in template. */
+async function roleAccess(tenantId, role) {
+  const template = ROLE_TEMPLATES[role] || {};
+  if (!tenantId || !EDITABLE_ROLES.includes(role)) return template;
+  const key = `${tenantId}:${role}`;
+  if (!accessCache.has(key)) {
+    const row = await get('SELECT permissions FROM role_access WHERE tenant_id = ? AND role = ?', [tenantId, role]);
+    accessCache.set(key, row ? normaliseAccess(parseJson(row.permissions, {})) : null);
+  }
+  return accessCache.get(key) || template;
+}
+export { roleAccess };
+
+/**
+ * What this one person has on top of their role: the areas the owner opened to
+ * them, and Projects for anyone seated as a project's lead or manager. Cached
+ * briefly; changing someone's extra access clears their entry.
+ */
+const personCache = new Map();
+const PERSON_TTL = 30_000;
+async function personalAccess(auth) {
+  if (!auth.userId || !auth.tenantId) return null;
+  const hit = personCache.get(auth.userId);
+  if (hit && hit.at > Date.now() - PERSON_TTL) return hit.access;
+  const row = await get('SELECT extra_access FROM users WHERE id = ? AND tenant_id = ?', [auth.userId, auth.tenantId]);
+  const access = { ...parseJson(row?.extra_access, {}) };
+  const leads = await get(
+    `SELECT 1 AS y FROM project_members pm JOIN projects p ON p.id = pm.project_id AND p.deleted_at IS NULL
+      WHERE pm.tenant_id = ? AND pm.user_id = ? AND pm.deleted_at IS NULL AND pm.seat IN ('manager', 'lead') LIMIT 1`,
+    [auth.tenantId, auth.userId],
+  );
+  if (leads) access.projects = [...new Set([...(access.projects || []), 'view'])];
+  personCache.set(auth.userId, { at: Date.now(), access });
+  return access;
+}
+export const invalidatePersonAccess = (userId) => (userId ? personCache.delete(userId) : personCache.clear());
+
+/** Role access, widened by what this person has been given. Never narrowed. */
 async function permissionsFor(auth) {
-  const base = ROLE_TEMPLATES[auth.role] || {};
+  const base = await roleOrCustomAccess(auth);
+  if (['owner', 'super_admin', 'client'].includes(auth.role)) return base;
+  const extra = await personalAccess(auth);
+  if (!extra || !Object.keys(extra).length) return base;
+  const out = { ...base };
+  for (const [m, actions] of Object.entries(extra)) {
+    if (!MODULES.includes(m) || m === 'platform') continue;
+    out[m] = ACTIONS.filter((a) => (base[m] || []).includes(a) || actions.includes(a));
+  }
+  return out;
+}
+
+async function roleOrCustomAccess(auth) {
+  const base = await roleAccess(auth.tenantId, auth.role);
   if (!auth.customRoleId) return base;
   const cacheKey = auth.customRoleId;
   if (!permsCache.has(cacheKey)) {
     const row = await get('SELECT permissions, base_role FROM custom_roles WHERE id = ? AND deleted_at IS NULL', [
       auth.customRoleId,
     ]);
-    permsCache.set(cacheKey, row ? { ...(ROLE_TEMPLATES[row.base_role] || {}), ...parseJson(row.permissions, {}) } : null);
+    permsCache.set(cacheKey, row ? { base_role: row.base_role, overrides: parseJson(row.permissions, {}) } : null);
   }
-  return permsCache.get(cacheKey) || base;
+  const custom = permsCache.get(cacheKey);
+  if (!custom) return base;
+  return { ...(await roleAccess(auth.tenantId, custom.base_role)), ...custom.overrides };
 }
 export const invalidateRoleCache = (id) => (id ? permsCache.delete(id) : permsCache.clear());
+/** After the owner changes a role's access, the next request uses it. */
+export const invalidateRoleAccess = (tenantId, role) => accessCache.delete(`${tenantId}:${role}`);
 
 export async function can(auth, module, action) {
   if (!auth) return false;

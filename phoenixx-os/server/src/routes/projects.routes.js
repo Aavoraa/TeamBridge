@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { get, all, run, repo, tx } from '../db/index.js';
 import { uuid, nowIso, toCsv } from '../lib/util.js';
 import { ok, created, validate, notFound, badRequest, conflict, forbidden, audit } from '../lib/http.js';
-import { requires } from '../middleware/rbac.js';
+import { requires, invalidatePersonAccess } from '../middleware/rbac.js';
 import { syncProjectChannel } from '../services/chat.js';
 import { clientIdForName } from '../services/clientAccounts.js';
 import {
@@ -330,6 +330,7 @@ router.post('/', requires('projects', 'create'), async (req, res) => {
     await setProjectOwners({ tenantId: req.auth.tenantId, actorId: req.auth.userId }, id, ownerIds);
   });
 
+  invalidatePersonAccess(); // its manager and lead now run a project
   // The team gets a room the moment the project exists (Module B).
   await syncProjectChannel(req.auth.tenantId, id, { actorId: req.auth.userId });
 
@@ -390,6 +391,7 @@ router.delete('/:id', requires('projects', 'delete'), async (req, res) => {
     await run('UPDATE project_members SET deleted_at = ? WHERE project_id = ? AND tenant_id = ? AND deleted_at IS NULL',
       [at, req.params.id, req.auth.tenantId]);
   });
+  invalidatePersonAccess(); // a lead or manager seat may have changed
   await syncProjectChannel(req.auth.tenantId, req.params.id, { actorId: req.auth.userId });
 
   await audit(req, { entity: 'project', entityId: req.params.id, action: 'delete', before });
@@ -565,6 +567,7 @@ router.post('/:id/members', requires('projects', 'edit'), async (req, res) => {
   const body = validate(memberSchema, req.body);
   const { id, user, existed } = await tx(async () => await addMember(req, req.params.id, body));
 
+  invalidatePersonAccess(); // a lead or manager seat may have changed
   await syncProjectChannel(req.auth.tenantId, req.params.id, { actorId: req.auth.userId });
 
   await audit(req, {
@@ -582,6 +585,7 @@ router.post('/:id/members/bulk', requires('projects', 'edit'), async (req, res) 
   const body = validate(z.object({ members: z.array(memberSchema).min(1).max(50) }), req.body);
   await tx(async () => { for (const m of body.members) await addMember(req, req.params.id, m); });
 
+  invalidatePersonAccess(); // a lead or manager seat may have changed
   await syncProjectChannel(req.auth.tenantId, req.params.id, { actorId: req.auth.userId });
 
   await audit(req, { entity: 'project', entityId: req.params.id, action: 'update', after: { added: body.members.length } });
@@ -608,6 +612,7 @@ router.patch('/:id/members/:memberId', requires('projects', 'edit'), async (req,
     }
   });
 
+  invalidatePersonAccess(); // a lead or manager seat may have changed
   await syncProjectChannel(req.auth.tenantId, req.params.id, { actorId: req.auth.userId });
 
   await audit(req, { entity: 'project_member', entityId: before.id, action: 'update', before, after: body });
@@ -638,6 +643,7 @@ router.delete('/:id/members/:memberId', requires('projects', 'edit'), async (req
     await syncSeatColumn(req.auth.tenantId, req.params.id, before.seat);
   });
 
+  invalidatePersonAccess(); // a lead or manager seat may have changed
   await syncProjectChannel(req.auth.tenantId, req.params.id, { actorId: req.auth.userId });
 
   await audit(req, { entity: 'project_member', entityId: before.id, action: 'delete', before });

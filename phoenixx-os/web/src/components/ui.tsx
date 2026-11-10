@@ -4,7 +4,7 @@ import {
   type SelectHTMLAttributes, type TextareaHTMLAttributes,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { X, ChevronDown, Check, AlertCircle, Loader2, Inbox, Search, ArrowUp, ArrowDown } from 'lucide-react';
+import { X, ChevronDown, Check, AlertCircle, Loader2, Inbox, Search, ArrowUp, ArrowDown, Eye, EyeOff } from 'lucide-react';
 import { useStockPhoto, avatarTint } from '../lib/avatar';
 import { initials, avatarStyle } from '../lib/format';
 
@@ -358,6 +358,22 @@ const inputBase =
 export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
   const id = useContext(FieldIdContext);
   return <input id={props.id || id} {...props} className={cx(inputBase, 'h-10', className)} />;
+}
+
+/** A password box with an eye to show what you typed. */
+export function PasswordInput({ className, ...props }: Omit<InputHTMLAttributes<HTMLInputElement>, 'type'>) {
+  const id = useContext(FieldIdContext);
+  const [shown, setShown] = useState(false);
+  return (
+    <div className="relative">
+      <input id={props.id || id} {...props} type={shown ? 'text' : 'password'} className={cx(inputBase, 'h-10 pr-10', className)} />
+      <button type="button" onClick={() => setShown((v) => !v)} tabIndex={-1}
+        aria-label={shown ? 'Hide password' : 'Show password'} title={shown ? 'Hide password' : 'Show password'}
+        className="absolute right-1 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-md text-subtle transition-colors hover:text-ink">
+        {shown ? <EyeOff size={16} strokeWidth={1.75} /> : <Eye size={16} strokeWidth={1.75} />}
+      </button>
+    </div>
+  );
 }
 
 /** Ref-forwarding: the chat composer needs the caret position to complete @names. */

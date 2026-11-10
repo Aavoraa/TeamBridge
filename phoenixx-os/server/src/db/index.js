@@ -235,6 +235,8 @@ const ADDED_COLUMNS = [
   // limiter: a lockout has to survive a restart and cannot be shed by moving IP.
   ['users', 'recovery_failed_attempts', 'INTEGER NOT NULL DEFAULT 0'],
   ['users', 'recovery_locked_until', 'TEXT'],
+  // Areas the owner opened to this one person on top of their role (Team > person).
+  ['users', 'extra_access', 'TEXT'],
   // Single-use, short-lived, stored as a SHA-256 digest like refresh tokens.
   ['users', 'recovery_token', 'TEXT'],
   ['users', 'recovery_token_expires_at', 'TEXT'],

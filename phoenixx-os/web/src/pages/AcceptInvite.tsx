@@ -5,7 +5,7 @@ import { ArrowRight, AlertTriangle } from 'lucide-react';
 import { api, tokens } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Logo } from '../components/Logo';
-import { Button, Field, Input } from '../components/ui';
+import { Button, Field, Input, PasswordInput } from '../components/ui';
 import {
   SecurityQuestionFields, EMPTY_SECURITY_QUESTION, isSecurityQuestionComplete,
   type SecurityQuestionValue,
@@ -81,11 +81,11 @@ export default function AcceptInvite() {
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Priya Venkatesh" />
           </Field>
           <Field label="Password" required hint="At least 8 characters">
-            <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+            <PasswordInput value={password} onChange={(e) => setPassword(e.target.value)}
               autoComplete="new-password" autoFocus />
           </Field>
           <Field label="Confirm password" required error={mismatch ? 'The passwords do not match' : undefined}>
-            <Input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)}
+            <PasswordInput value={confirm} onChange={(e) => setConfirm(e.target.value)}
               autoComplete="new-password" />
           </Field>
 

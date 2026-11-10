@@ -200,6 +200,17 @@ const isProjectOwner = async (tenantId, projectId, userId) => !!await get(
 const isWorkspaceOwner = (auth) => ['owner', 'super_admin'].includes(auth.role);
 
 /** Working a lead - add, edit, log, update, move status: anyone on the project, its owners, or the assignee. */
+/** On the team of any live marketing project - the people who work its leads. */
+export async function onMarketingProject(auth) {
+  if (!auth?.userId || auth.role === 'client') return false;
+  return !!await get(
+    `SELECT 1 AS y FROM project_members pm
+       JOIN projects p ON p.id = pm.project_id AND p.deleted_at IS NULL AND p.kind = 'marketing'
+      WHERE pm.tenant_id = ? AND pm.user_id = ? AND pm.deleted_at IS NULL LIMIT 1`,
+    [auth.tenantId, auth.userId],
+  );
+}
+
 export async function canWorkLead(auth, projectId, lead = null) {
   if (isWorkspaceOwner(auth)) return true;
   if (lead && lead.assigned_to === auth.userId) return true;

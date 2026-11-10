@@ -4,7 +4,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { ArrowRight, AlertTriangle, Clock3 } from 'lucide-react';
 import { api } from '../lib/api';
 import { Logo } from '../components/Logo';
-import { Button, Field, Input, Select } from '../components/ui';
+import { Button, Field, Input, Select, PasswordInput } from '../components/ui';
 import {
   SecurityQuestionFields, EMPTY_SECURITY_QUESTION, isSecurityQuestionComplete,
   type SecurityQuestionValue,
@@ -124,7 +124,7 @@ export default function JoinWorkspace() {
       <h1 className="text-[23px] font-semibold text-ink tracking-[-0.01em]">Join {info.data.workspace}</h1>
       <p className="mt-1 text-[14px] text-subtle">
         {info.data.invited_by ? `${info.data.invited_by} invited you. ` : ''}
-        Create your account and tell us your role. The owner or HR approves it before you can sign in.
+        Create your account and tell us your role. The owner, HR or a manager approves it before you can sign in.
       </p>
 
       <form className="mt-7 space-y-4" noValidate onSubmit={(e) => { e.preventDefault(); if (ready) send.mutate(); }}>
@@ -152,10 +152,10 @@ export default function JoinWorkspace() {
           </Field>
         </div>
         <Field label="Password" required hint="At least 8 characters" error={fieldErrors.password}>
-          <Input type="password" value={form.password} onChange={(e) => set('password', e.target.value)} autoComplete="new-password" />
+          <PasswordInput value={form.password} onChange={(e) => set('password', e.target.value)} autoComplete="new-password" />
         </Field>
         <Field label="Confirm password" required error={mismatch ? 'The passwords do not match' : undefined}>
-          <Input type="password" value={form.confirm} onChange={(e) => set('confirm', e.target.value)} autoComplete="new-password" />
+          <PasswordInput value={form.confirm} onChange={(e) => set('confirm', e.target.value)} autoComplete="new-password" />
         </Field>
 
         <div className="border-t border-line pt-4 space-y-4">

@@ -3,8 +3,11 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { get, all, run, repo } from '../db/index.js';
 import { uuid, nowIso, parseJson, toCsv } from '../lib/util.js';
-import { ok, created, validate, notFound, badRequest, audit, paginate, pageMeta } from '../lib/http.js';
-import { requires, MODULES, ACTIONS, ROLE_TEMPLATES, invalidateRoleCache } from '../middleware/rbac.js';
+import { ok, created, validate, notFound, badRequest, forbidden, audit, paginate, pageMeta } from '../lib/http.js';
+import {
+  requires, MODULES, ACTIONS, ROLE_TEMPLATES, invalidateRoleCache, EDITABLE_ROLES, normaliseAccess, roleAccess,
+  invalidateRoleAccess,
+} from '../middleware/rbac.js';
 import { peekNumber, numberingAudit } from '../services/numbering.js';
 import { STATE_CODES } from '../services/gst.js';
 import { seedTenantContent } from '../services/provisioning.js';
@@ -276,6 +279,71 @@ router.post('/leave-types', requires('settings', 'create'), async (req, res) => 
       body.paid === false ? 0 : 1, body.color || '#3B82F6', nowIso()],
   );
   return created(res, await get('SELECT * FROM leave_types WHERE id = ?', [id]));
+});
+
+// ================================================================ ROLE ACCESS
+/**
+ * What each role may do in this workspace. The owner sets it in Settings >
+ * Roles; the server enforces it on every request and the menu is drawn from
+ * it, so the two cannot disagree. Owners always have everything; clients keep
+ * their fixed portal access.
+ */
+router.get('/access', requires('users', 'view'), async (req, res) => {
+  const rows = await all('SELECT role, updated_at, updated_by FROM role_access WHERE tenant_id = ?', [req.auth.tenantId]);
+  const changed = Object.fromEntries(rows.map((r) => [r.role, r.updated_at]));
+  const roles = {};
+  for (const role of EDITABLE_ROLES) {
+    roles[role] = {
+      access: normaliseAccess(await roleAccess(req.auth.tenantId, role)),
+      defaults: normaliseAccess(ROLE_TEMPLATES[role]),
+      customised_at: changed[role] || null,
+      people: Number((await get(
+        "SELECT COUNT(*) AS n FROM users WHERE tenant_id = ? AND role = ? AND deleted_at IS NULL AND status != 'disabled'",
+        [req.auth.tenantId, role],
+      ))?.n || 0),
+    };
+  }
+  return ok(res, { modules: MODULES.filter((m) => m !== 'platform'), actions: ACTIONS, roles, can_edit: req.auth.role === 'owner' || req.auth.role === 'super_admin' });
+});
+
+const ownerDecides = (req) => {
+  if (!['owner', 'super_admin'].includes(req.auth.role)) throw forbidden('Only the workspace owner changes what each role can do');
+};
+const editableRole = (role) => {
+  if (!EDITABLE_ROLES.includes(role)) throw badRequest('That role cannot be changed here');
+  return role;
+};
+
+router.put('/access/:role', async (req, res) => {
+  ownerDecides(req);
+  const role = editableRole(req.params.role);
+  const { permissions } = validate(z.object({ permissions: z.record(z.string(), z.array(z.string())) }), req.body);
+  for (const [mod, actions] of Object.entries(permissions)) {
+    if (!MODULES.includes(mod)) throw badRequest(`Unknown area "${mod}"`);
+    const bad = actions.filter((a) => !ACTIONS.includes(a));
+    if (bad.length) throw badRequest(`Unknown action(s) on ${mod}: ${bad.join(', ')}`);
+  }
+  const before = normaliseAccess(await roleAccess(req.auth.tenantId, role));
+  const access = normaliseAccess(permissions);
+  const ts = nowIso();
+  await run('DELETE FROM role_access WHERE tenant_id = ? AND role = ?', [req.auth.tenantId, role]);
+  await run('INSERT INTO role_access (tenant_id, role, permissions, updated_by, updated_at) VALUES (?,?,?,?,?)',
+    [req.auth.tenantId, role, JSON.stringify(access), req.auth.userId, ts]);
+  invalidateRoleAccess(req.auth.tenantId, role);
+  invalidateRoleCache();
+  await audit(req, { entity: 'role_access', entityId: role, action: 'update', before, after: access });
+  return ok(res, { role, access, customised_at: ts });
+});
+
+/** Back to the built-in access for the role. */
+router.delete('/access/:role', async (req, res) => {
+  ownerDecides(req);
+  const role = editableRole(req.params.role);
+  await run('DELETE FROM role_access WHERE tenant_id = ? AND role = ?', [req.auth.tenantId, role]);
+  invalidateRoleAccess(req.auth.tenantId, role);
+  invalidateRoleCache();
+  await audit(req, { entity: 'role_access', entityId: role, action: 'reset' });
+  return ok(res, { role, access: normaliseAccess(ROLE_TEMPLATES[role]), customised_at: null });
 });
 
 // =============================================================== CUSTOM ROLES

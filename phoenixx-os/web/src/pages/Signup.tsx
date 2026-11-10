@@ -6,7 +6,7 @@ import { useAuth } from '../lib/auth';
 import { Logo } from '../components/Logo';
 import { api, ApiError } from '../lib/api';
 import { money } from '../lib/format';
-import { Button, Field, Input, cx } from '../components/ui';
+import { Button, Field, Input, cx, PasswordInput } from '../components/ui';
 import {
   SecurityQuestionFields, EMPTY_SECURITY_QUESTION, isSecurityQuestionComplete,
   type SecurityQuestionValue,
@@ -147,7 +147,7 @@ export default function Signup() {
                   <Input value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="+91 98765 43210" />
                 </Field>
                 <Field label="Password" required hint="At least 8 characters" error={fieldErrors.password}>
-                  <Input type="password" value={form.password} onChange={(e) => set('password', e.target.value)}
+                  <PasswordInput value={form.password} onChange={(e) => set('password', e.target.value)}
                     autoComplete="new-password" />
                 </Field>
 

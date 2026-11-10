@@ -26,7 +26,8 @@ export const usePendingJoinCount = (enabled: boolean) => useQuery({
 });
 
 /** Owner's view: people who created their account and wait for approval, and invitations not used yet. */
-export default function JoinRequests({ onInvite }: { onInvite: () => void }) {
+export default function JoinRequests({ onInvite }: { onInvite?: () => void }) {
+  // Without onInvite this is a manager: they approve employees and do not send invitations.
   const [status, setStatus] = useState('pending');
   const requests = useQuery({
     queryKey: ['join-requests', status],
@@ -39,8 +40,10 @@ export default function JoinRequests({ onInvite }: { onInvite: () => void }) {
     <div className="space-y-4">
       <Card>
         <CardHeader title="Waiting for your approval" icon={<UserPlus size={16} />}
-          subtitle="People you invited who have created their account. They cannot sign in until you approve them."
-          action={<Button variant="primary" icon={<Mail size={15} />} onClick={onInvite}>Invite people</Button>} />
+          subtitle={onInvite
+            ? 'People you invited who have created their account. They cannot sign in until you approve them.'
+            : 'People joining as an employee. They cannot sign in until you, HR or the owner approves them. Anyone you approve reports to you unless you pick someone else.'}
+          action={onInvite && <Button variant="primary" icon={<Mail size={15} />} onClick={onInvite}>Invite people</Button>} />
         <div className="px-5 pb-3">
           <Tabs active={status} onChange={setStatus} tabs={[
             { id: 'pending', label: 'Waiting', count: pending },
@@ -83,7 +86,7 @@ export default function JoinRequests({ onInvite }: { onInvite: () => void }) {
             </Table>
           )}
       </Card>
-      <OpenInvites />
+      {onInvite && <OpenInvites />}
     </div>
   );
 }
@@ -91,8 +94,11 @@ export default function JoinRequests({ onInvite }: { onInvite: () => void }) {
 function PendingRow({ r }: { r: any }) {
   const qc = useQueryClient();
   const toast = useToast();
+  const { user } = useAuth();
+  const isManager = user?.role === 'manager';
   const [role, setRole] = useState(r.requested_role);
-  const [managerId, setManagerId] = useState('');
+  // A manager approving someone is their manager unless they choose another.
+  const [managerId, setManagerId] = useState(isManager ? user?.id || '' : '');
   const [rejectOpen, setRejectOpen] = useState(false);
   const [note, setNote] = useState('');
 
@@ -126,7 +132,6 @@ function PendingRow({ r }: { r: any }) {
   });
   const overBand = approve.error && (approve.error as any).message?.includes('covers up to');
   // A paid seat beyond the plan is the owner's decision; HR sees why it stopped.
-  const { user } = useAuth();
   const ownerDecides = !!overBand && user?.role !== 'owner';
 
   return (
@@ -144,7 +149,7 @@ function PendingRow({ r }: { r: any }) {
         <label className="block">
           <span className="block mb-1 text-[11.5px] text-subtle">Role to give</span>
           <Select value={role} onChange={(e) => setRole(e.target.value)} aria-label={`Role for ${r.name}`} className="w-[140px]">
-            {ROLES.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
+            {ROLES.filter((x) => !isManager || x.id === 'employee').map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
           </Select>
         </label>
         <label className="block">

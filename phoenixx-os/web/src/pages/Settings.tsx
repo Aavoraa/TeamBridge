@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { AccessEditor } from '../components/AccessEditor';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -30,7 +31,7 @@ export default function Settings() {
             { id: 'pipeline', label: 'Pipeline & categories' },
             { id: 'reasons', label: 'Reason codes' },
             { id: 'todo', label: 'Advance Planner' },
-            { id: 'roles', label: 'Roles' },
+            { id: 'roles', label: 'Roles & access' },
             { id: 'webhooks', label: 'Webhooks' },
             { id: 'audit', label: 'Audit log' },
           ]} />
@@ -963,69 +964,9 @@ function RolesTab() {
 
   if (isLoading || !data) return <Card><TableSkeleton cols={5} /></Card>;
 
-  const ROLES = ['owner', 'manager', 'employee', 'finance', 'hr'];
-  const ACTION_LABEL: Record<string, string> = {
-    view: 'V', create: 'C', edit: 'E', approve: 'A', delete: 'D', export: 'X',
-  };
-
   return (
     <>
-      <Card className="mb-4">
-        <div className="px-4 py-3 text-[13px] text-muted leading-relaxed">
-          Permissions are module × action. <strong className="text-ink">V</strong>iew,{' '}
-          <strong className="text-ink">C</strong>reate, <strong className="text-ink">E</strong>dit,{' '}
-          <strong className="text-ink">A</strong>pprove, <strong className="text-ink">D</strong>elete,{' '}
-          e<strong className="text-ink">X</strong>port. Employees additionally only see their own
-          records; managers see their team's.
-        </div>
-      </Card>
-
-      <Card>
-        <CardHeader title="Role permission matrix" subtitle="Built-in templates" icon={<KeyRound size={16} />} />
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm border-collapse">
-            <thead className="bg-sunken">
-              <tr>
-                <th className="label-cap px-3 py-2 text-left border-b border-line sticky left-0 bg-sunken z-10 min-w-[160px]">
-                  Module
-                </th>
-                {ROLES.map((r) => (
-                  <th key={r} className="label-cap px-3 py-2 text-center border-b border-line min-w-[110px]">{r}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {data.modules.map((m: string) => (
-                <tr key={m} className="row-hover">
-                  <td className="px-3 py-2 border-b border-line sticky left-0 bg-raised z-10 text-[13px] text-ink capitalize">
-                    {m.replace(/_/g, ' ')}
-                  </td>
-                  {ROLES.map((r) => {
-                    const actions: string[] = data.templates[r]?.[m] || [];
-                    return (
-                      <td key={r} className="px-3 py-2 border-b border-line text-center">
-                        {!actions.length ? <span className="text-subtle text-[12px]">—</span> : (
-                          <span className="inline-flex gap-0.5">
-                            {['view', 'create', 'edit', 'approve', 'delete', 'export'].map((a) => (
-                              <span key={a} title={a}
-                                className={cx('grid h-[18px] w-[18px] place-items-center rounded text-[10px] font-semibold',
-                                  actions.includes(a)
-                                    ? 'bg-brand-soft text-[var(--brand)]'
-                                    : 'bg-transparent text-transparent')}>
-                                {ACTION_LABEL[a]}
-                              </span>
-                            ))}
-                          </span>
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+      <AccessEditor />
 
       {data.custom?.length > 0 && (
         <Card className="mt-5">

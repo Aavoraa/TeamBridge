@@ -10,8 +10,7 @@ import {
 } from '../components/SecurityQuestion';
 import {
   Avatar, Badge, Button, Card, CardHeader, EmptyState, Field, Input, Modal, PageHeader,
-  Table, TD, TH, THead, TR, useToast, cx, Skeleton,
-} from '../components/ui';
+  Table, TD, TH, THead, TR, useToast, cx, Skeleton, PasswordInput } from '../components/ui';
 
 export default function Profile() {
   const { user, tenant, refresh } = useAuth();
@@ -280,14 +279,14 @@ function PasswordModal({ onClose }: { onClose: () => void }) {
       }>
       <div className="space-y-4">
         <Field label="Current password" required>
-          <Input type="password" value={current} onChange={(e) => setCurrent(e.target.value)}
+          <PasswordInput value={current} onChange={(e) => setCurrent(e.target.value)}
             autoComplete="current-password" autoFocus />
         </Field>
         <Field label="New password" required hint="At least 8 characters">
-          <Input type="password" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" />
+          <PasswordInput value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" />
         </Field>
         <Field label="Confirm new password" required error={mismatch ? 'The passwords do not match' : undefined}>
-          <Input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" />
+          <PasswordInput value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" />
         </Field>
         <p className="text-[12.5px] text-subtle">
           Every other session is signed out when the password changes.
@@ -343,7 +342,7 @@ function SecurityQuestionModal({ current, onClose, onSaved }: {
           errors={errors} />
         <Field label="Your current password" required error={errors.password}
           hint="Confirms it is really you changing this">
-          <Input type="password" value={password} autoComplete="current-password"
+          <PasswordInput value={password} autoComplete="current-password"
             onChange={(e) => { setPassword(e.target.value); setErrors((x) => ({ ...x, password: '' })); }} />
         </Field>
       </div>

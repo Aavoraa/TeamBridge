@@ -9,6 +9,7 @@ import {
   signAccessToken, signRefreshToken, verifyRefreshToken, authenticate,
 } from '../middleware/auth.js';
 import { permissionMatrix } from '../middleware/rbac.js';
+import { onMarketingProject } from '../services/marketing.js';
 import { provisionTenant } from '../services/provisioning.js';
 import { rateLimit } from '../middleware/common.js';
 import {
@@ -67,6 +68,8 @@ async function sessionPayload(user) {
       notification_prefs: parseJson(user.notification_prefs, {}),
     },
     tenant: tenant ? { ...tenant, settings: parseJson(tenant.settings, {}) } : null,
+    /** Opens Marketing leads for someone on a marketing project's team, CRM access or not. */
+    on_marketing_project: user.tenant_id ? await onMarketingProject({ userId: user.id, tenantId: user.tenant_id, role: user.role }) : false,
     subscription: subscription
       ? {
         ...subscription,
@@ -75,6 +78,8 @@ async function sessionPayload(user) {
       }
       : null,
     permissions: await permissionMatrix({
+      userId: user.id,
+      tenantId: user.tenant_id,
       role: user.role,
       customRoleId: user.custom_role_id,
     }),
@@ -140,7 +145,7 @@ router.post('/login', rateLimit({ max: 20, windowMs: 15 * 60_000 }), async (req,
     );
     if (pending?.password_hash && bcrypt.compareSync(password, pending.password_hash)) {
       throw new ApiError(403, 'pending_approval',
-        `Your request to join ${pending.workspace} is waiting for approval from the owner or HR. You can sign in once it is approved.`);
+        `Your request to join ${pending.workspace} is waiting for approval from the owner, HR or a manager. You can sign in once it is approved.`);
     }
   }
   if (!user || !valid) throw unauthorized('Email or password is incorrect');

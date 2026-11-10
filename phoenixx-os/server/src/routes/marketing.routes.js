@@ -11,6 +11,20 @@ import * as M from '../services/marketing.js';
 const router = Router();
 
 /**
+ * Marketing leads belong to the team of their marketing project. Anyone with
+ * CRM access reaches them, and so does anyone on a marketing project's team -
+ * an employee without CRM still works their own project's leads. Every route
+ * then limits them to the projects they can see and work (below).
+ */
+function leadsAccess(action) {
+  return async (req, _res, next) => {
+    if (await can(req.auth, 'crm', action)) return next();
+    if (action !== 'delete' && await M.onMarketingProject(req.auth)) return next();
+    return next(forbidden('Marketing leads are for the marketing project team'));
+  };
+}
+
+/**
  * Marketing projects and their leads - see services/marketing.js for the rules.
  *
  * Reading follows project visibility (employees and managers see only the
@@ -48,7 +62,7 @@ const leadById = async (req, id) => {
 };
 
 // ------------------------------------------------------------------ meta
-router.get('/meta', requires('crm', 'view'), async (req, res) => ok(res, {
+router.get('/meta', leadsAccess('view'), async (req, res) => ok(res, {
   statuses: M.STATUSES,
   sources: M.SOURCES,
   temperatures: M.TEMPERATURES,
@@ -71,7 +85,7 @@ router.put('/settings', requires('settings', 'edit'), async (req, res) => {
 
 // -------------------------------------------------------------- projects
 /** Every marketing project this person can see, with headline numbers. */
-router.get('/projects', requires('crm', 'view'), async (req, res) => {
+router.get('/projects', leadsAccess('view'), async (req, res) => {
   const ids = await visibleProjectIds(req.auth);
   if (!ids.length) return ok(res, []);
   const ctx = await M.healthContext(req.auth.tenantId);
@@ -99,7 +113,7 @@ router.get('/projects', requires('crm', 'view'), async (req, res) => {
   })));
 });
 
-router.get('/projects/:pid/overview', requires('crm', 'view'), async (req, res) => {
+router.get('/projects/:pid/overview', leadsAccess('view'), async (req, res) => {
   const project = await projectOr404(req, req.params.pid);
   return ok(res, {
     ...await M.overviewFor(req.auth.tenantId, project),
@@ -111,7 +125,7 @@ router.get('/projects/:pid/overview', requires('crm', 'view'), async (req, res) 
 // ----------------------------------------------------------------- leads
 const VIEWS = ['all', 'mine', 'new', 'followup_today', 'progressive', 'owner_attention', 'won'];
 
-router.get('/projects/:pid/leads', requires('crm', 'view'), async (req, res) => {
+router.get('/projects/:pid/leads', leadsAccess('view'), async (req, res) => {
   const project = await projectOr404(req, req.params.pid);
   const ctx = await M.healthContext(req.auth.tenantId);
   const view = VIEWS.includes(req.query.view) ? req.query.view : 'all';
@@ -190,7 +204,7 @@ async function insertLead(req, project, body, { source = 'manual', at = nowIso()
   return id;
 }
 
-router.post('/projects/:pid/leads', requires('crm', 'create'), async (req, res) => {
+router.post('/projects/:pid/leads', leadsAccess('create'), async (req, res) => {
   const project = await projectOr404(req, req.params.pid);
   await mustWork(req, project);
   const body = validate(leadSchema, req.body);
@@ -208,7 +222,7 @@ router.post('/projects/:pid/leads', requires('crm', 'create'), async (req, res) 
 });
 
 /** CSV import: header row, then one lead per row. Duplicates are reported and skipped. */
-router.post('/projects/:pid/leads/import', requires('crm', 'create'), async (req, res) => {
+router.post('/projects/:pid/leads/import', leadsAccess('create'), async (req, res) => {
   const project = await projectOr404(req, req.params.pid);
   await mustWork(req, project);
   const { csv, assigned_to: defaultAssignee } = validate(z.object({ csv: z.string().min(1).max(5_000_000), assigned_to: z.string().optional().nullable() }), req.body);
@@ -257,7 +271,7 @@ router.post('/projects/:pid/leads/import', requires('crm', 'create'), async (req
   return created(res, result);
 });
 
-router.get('/leads/:id', requires('crm', 'view'), async (req, res) => {
+router.get('/leads/:id', leadsAccess('view'), async (req, res) => {
   const { lead, project } = await leadOr404(req, req.params.id);
   const tenantId = req.auth.tenantId;
   const timeline = (await all(
@@ -298,7 +312,7 @@ const TRACKED = {
  * Edit a lead. Status (the dropdown), assignee and every other field change
  * here, and each kind of change lands on the timeline as its own entry.
  */
-router.patch('/leads/:id', requires('crm', 'edit'), async (req, res) => {
+router.patch('/leads/:id', leadsAccess('edit'), async (req, res) => {
   const { lead, project } = await leadOr404(req, req.params.id);
   await mustWork(req, project, lead);
   const body = validate(leadSchema.partial().extend({
@@ -394,7 +408,7 @@ async function convertWon(req, lead, createClient, at) {
 }
 
 // ---------------------------------------------------------- activities
-router.post('/leads/:id/activities', requires('crm', 'edit'), async (req, res) => {
+router.post('/leads/:id/activities', leadsAccess('edit'), async (req, res) => {
   const { lead, project } = await leadOr404(req, req.params.id);
   await mustWork(req, project, lead);
   const body = validate(z.object({
@@ -427,7 +441,7 @@ const updateSchema = z.object({
   owner_action_priority: z.enum(M.PRIORITIES).optional().nullable(),
 });
 
-router.post('/leads/:id/updates', requires('crm', 'edit'), async (req, res) => {
+router.post('/leads/:id/updates', leadsAccess('edit'), async (req, res) => {
   const { lead, project } = await leadOr404(req, req.params.id);
   await mustWork(req, project, lead);
   if (!M.OPEN_STATUSES.includes(lead.status)) throw badRequest('Daily updates are for open leads');
@@ -491,7 +505,7 @@ const starSchema = z.object({
   reason: z.string().trim().max(500).optional(),
 });
 
-router.post('/leads/:id/progressive', requires('crm', 'edit'), async (req, res) => {
+router.post('/leads/:id/progressive', leadsAccess('edit'), async (req, res) => {
   const { lead, project } = await leadOr404(req, req.params.id);
   await mustSteer(req, project);
   if (!M.OPEN_STATUSES.includes(lead.status)) throw badRequest('Only open leads can carry a ⭐');
@@ -531,7 +545,7 @@ router.post('/leads/:id/progressive', requires('crm', 'edit'), async (req, res) 
   return ok(res, await leadById(req, lead.id));
 });
 
-router.patch('/leads/:id/progressive', requires('crm', 'edit'), async (req, res) => {
+router.patch('/leads/:id/progressive', leadsAccess('edit'), async (req, res) => {
   const { lead, project } = await leadOr404(req, req.params.id);
   await mustSteer(req, project);
   const body = validate(z.object({ priority: z.enum(M.PRIORITIES) }), req.body);
@@ -558,7 +572,7 @@ async function raiseOwnerAction(req, project, lead, body, at) {
     lead, dedupeKey: `mkt:owner_action:${lead.id}:${at}` });
 }
 
-router.post('/leads/:id/owner-action', requires('crm', 'edit'), async (req, res) => {
+router.post('/leads/:id/owner-action', leadsAccess('edit'), async (req, res) => {
   const { lead, project } = await leadOr404(req, req.params.id);
   await mustWork(req, project, lead);
   const body = validate(z.object({
@@ -571,7 +585,7 @@ router.post('/leads/:id/owner-action', requires('crm', 'edit'), async (req, res)
   return created(res, await leadById(req, lead.id));
 });
 
-router.post('/leads/:id/owner-action/resolve', requires('crm', 'edit'), async (req, res) => {
+router.post('/leads/:id/owner-action/resolve', leadsAccess('edit'), async (req, res) => {
   const { lead, project } = await leadOr404(req, req.params.id);
   await mustWork(req, project, lead);
   if (!lead.owner_action_required) throw badRequest('There is no open owner action on this lead');
@@ -586,7 +600,7 @@ router.post('/leads/:id/owner-action/resolve', requires('crm', 'edit'), async (r
 });
 
 /** Every open owner action across the marketing projects this person can see. */
-router.get('/owner-attention', requires('crm', 'view'), async (req, res) => {
+router.get('/owner-attention', leadsAccess('view'), async (req, res) => {
   const ids = await visibleProjectIds(req.auth);
   if (!ids.length) return ok(res, []);
   const ctx = await M.healthContext(req.auth.tenantId);
@@ -603,7 +617,7 @@ router.get('/owner-attention', requires('crm', 'view'), async (req, res) => {
 });
 
 // ------------------------------------------------------------- dead
-router.post('/leads/:id/dead', requires('crm', 'edit'), async (req, res) => {
+router.post('/leads/:id/dead', leadsAccess('edit'), async (req, res) => {
   const { lead, project } = await leadOr404(req, req.params.id);
   await mustSteer(req, project);
   if (!M.OPEN_STATUSES.includes(lead.status)) throw badRequest('Only open leads can be marked dead');
@@ -633,7 +647,7 @@ router.post('/leads/:id/dead', requires('crm', 'edit'), async (req, res) => {
   return ok(res, await leadById(req, lead.id));
 });
 
-router.post('/leads/:id/revive', requires('crm', 'edit'), async (req, res) => {
+router.post('/leads/:id/revive', leadsAccess('edit'), async (req, res) => {
   const { lead, project } = await leadOr404(req, req.params.id);
   await mustSteer(req, project);
   if (lead.status !== 'dead') throw badRequest('Only a dead lead can be revived');
@@ -649,7 +663,7 @@ router.post('/leads/:id/revive', requires('crm', 'edit'), async (req, res) => {
   return ok(res, await leadById(req, lead.id));
 });
 
-router.get('/projects/:pid/dead-leads', requires('crm', 'view'), async (req, res) => {
+router.get('/projects/:pid/dead-leads', leadsAccess('view'), async (req, res) => {
   const project = await projectOr404(req, req.params.pid);
   return ok(res, (await all(
     `SELECT d.id, d.lead_id, d.reason_code, d.reason_note, d.status_at_death, d.was_progressive, d.marked_at,
@@ -664,7 +678,7 @@ router.get('/projects/:pid/dead-leads', requires('crm', 'view'), async (req, res
   )).map((d) => ({ ...d, reason_label: M.DEAD_REASONS.find((r) => r.id === d.reason_code)?.label || d.reason_code })));
 });
 
-router.delete('/leads/:id', requires('crm', 'delete'), async (req, res) => {
+router.delete('/leads/:id', leadsAccess('delete'), async (req, res) => {
   const { lead, project } = await leadOr404(req, req.params.id);
   await mustSteer(req, project);
   await run('UPDATE leads SET deleted_at = ?, updated_at = ? WHERE id = ?', [nowIso(), nowIso(), lead.id]);
@@ -673,7 +687,7 @@ router.delete('/leads/:id', requires('crm', 'delete'), async (req, res) => {
 });
 
 // ---------------------------------------------------- project timeline
-router.get('/projects/:pid/activities', requires('crm', 'view'), async (req, res) => {
+router.get('/projects/:pid/activities', leadsAccess('view'), async (req, res) => {
   const project = await projectOr404(req, req.params.pid);
   const limit = Math.min(Number(req.query.limit) || 100, 300);
   return ok(res, (await all(
@@ -685,7 +699,7 @@ router.get('/projects/:pid/activities', requires('crm', 'view'), async (req, res
 });
 
 // --------------------------------------------------------------- reports
-router.get('/projects/:pid/reports', requires('crm', 'view'), async (req, res) => {
+router.get('/projects/:pid/reports', leadsAccess('view'), async (req, res) => {
   const project = await projectOr404(req, req.params.pid);
   return ok(res, await all(
     `SELECT id, kind, title, period_start, period_end, generated_at FROM report_runs
@@ -694,7 +708,7 @@ router.get('/projects/:pid/reports', requires('crm', 'view'), async (req, res) =
   ));
 });
 
-router.post('/projects/:pid/reports', requires('crm', 'view'), async (req, res) => {
+router.post('/projects/:pid/reports', leadsAccess('view'), async (req, res) => {
   const project = await projectOr404(req, req.params.pid);
   if (!await M.canWorkLead(req.auth, project.id)) throw forbidden('Only people on this marketing project can generate its reports');
   const { kind } = validate(z.object({ kind: z.enum(['marketing_daily', 'marketing_weekly']) }), req.body);

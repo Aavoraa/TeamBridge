@@ -66,7 +66,7 @@ test('the invitee creates their own account for the invited email; it waits for 
   assert.equal(await db.get("SELECT id FROM users WHERE email = 'priya@join.test'"), undefined);
   const login = await api.post('/auth/login', { email: 'priya@join.test', password: 'Password@123' });
   assert.equal(login.status, 403);
-  assert.match(login.body.error.message, /waiting for approval from the owner or HR/);
+  assert.match(login.body.error.message, /waiting for approval from the owner, HR or a manager/);
   assert.equal((await api.post('/auth/login', { email: 'priya@join.test', password: 'WrongGuess1' })).status, 401);
 
   const note = await db.get("SELECT title FROM notifications WHERE event_key = 'team.join_request' AND channel = 'in_app'");
@@ -83,8 +83,8 @@ test('the invitee creates their own account for the invited email; it waits for 
   assert.equal(weak.status, 422);
 });
 
-let hrAuth;
-test('the owner and HR invite and decide; nobody else does', async () => {
+let hrAuth; let mgrAuth; let mgrId;
+test('the owner and HR invite; a manager decides only employee sign-ups', async () => {
   const inv = await api.post('/users', { name: 'Hari HR', email: 'hr@join.test', role: 'hr' }, auth);
   const t = new URL(inv.body.data.invite_url).searchParams.get('token');
   const hr = await api.post('/auth/accept-invite', { token: t, password: 'Password@123', ...SQ });
@@ -97,8 +97,15 @@ test('the owner and HR invite and decide; nobody else does', async () => {
   const mInv = await api.post('/users', { name: 'Mani Manager', email: 'mani@join.test', role: 'manager' }, auth);
   const mt = new URL(mInv.body.data.invite_url).searchParams.get('token');
   const mgr = { token: (await api.post('/auth/accept-invite', { token: mt, password: 'Password@123', ...SQ })).body.data.access_token };
-  assert.equal((await api.get('/team-join/requests', mgr)).status, 403);
-  assert.equal((await api.post('/team-join/invites', { people: [{ email: 'y@join.test' }] }, mgr)).status, 403);
+  const seen = await api.get('/team-join/requests', mgr);
+  assert.equal(seen.status, 200, 'a manager sees sign-ups');
+  assert.equal(seen.body.meta.pending, 0, 'but not the one asking to join as a manager');
+  const mgrReq = (await api.get('/team-join/requests', auth)).body.data[0];
+  assert.equal((await api.post(`/team-join/requests/${mgrReq.id}/approve`, {}, mgr)).status, 403);
+  assert.equal((await api.post(`/team-join/requests/${mgrReq.id}/reject`, {}, mgr)).status, 403);
+  assert.equal((await api.post('/team-join/invites', { people: [{ email: 'y@join.test' }] }, mgr)).status, 403, 'inviting stays with the owner and HR');
+  mgrAuth = mgr;
+  mgrId = mInv.body.data.id;
 });
 
 test('approving creates the account with the role the owner settles on; they can then sign in', async () => {
@@ -171,4 +178,24 @@ test('HR sends an invite, is told when the person signs up, and approves them', 
   const ok = await api.post(`/team-join/requests/${req.id}/approve`, { role: 'employee' }, hrAuth);
   assert.equal(ok.status, 200, JSON.stringify(ok.body));
   assert.equal((await api.post('/auth/login', { email: 'devi@join.test', password: 'Password@123' })).status, 200);
+});
+
+test('a manager approves an employee sign-up, who then reports to them', async () => {
+  const res = await api.post('/team-join/invites', { people: [{ email: 'kavin@join.test', name: 'Kavin' }] }, auth);
+  const link = tokenOf(res.body.data.results[0].invite_url);
+  assert.equal((await api.post(`/public/join/${link}`, signup({ name: 'Kavin Raj', role: 'employee' }))).status, 201);
+
+  const notes = (await api.get('/notifications', mgrAuth)).body.data;
+  assert.ok(notes.some((n) => /Kavin Raj/.test(n.title)), 'managers hear about employee sign-ups');
+
+  const req = (await api.get('/team-join/requests', mgrAuth)).body.data.find((r) => r.email === 'kavin@join.test');
+  assert.ok(req, 'the manager sees the employee request');
+  assert.equal((await api.post(`/team-join/requests/${req.id}/approve`, { role: 'hr' }, mgrAuth)).status, 403,
+    'a manager cannot turn a sign-up into another role');
+  const ok = await api.post(`/team-join/requests/${req.id}/approve`, {}, mgrAuth);
+  assert.equal(ok.status, 200, JSON.stringify(ok.body));
+  assert.equal(ok.body.data.role, 'employee');
+  const user = await db.get('SELECT manager_id FROM users WHERE id = ?', [ok.body.data.user_id]);
+  assert.equal(user.manager_id, mgrId, 'they report to the manager who approved them');
+  assert.equal((await api.post('/auth/login', { email: 'kavin@join.test', password: 'Password@123' })).status, 200);
 });

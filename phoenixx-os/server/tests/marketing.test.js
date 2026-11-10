@@ -79,8 +79,9 @@ describe('leads in a marketing project', () => {
   });
 
   test('someone not on the project cannot see or add its leads', async () => {
-    assert.equal((await api.get(`/marketing/projects/${project.id}/leads`, { token: rahul.token })).status, 404);
-    assert.equal((await api.post(`/marketing/projects/${project.id}/leads`, { company_name: 'X' }, { token: rahul.token })).status, 404);
+    // Refused (no CRM access and on no marketing team) or not found (it is not theirs): never let in.
+    assert.ok([403, 404].includes((await api.get(`/marketing/projects/${project.id}/leads`, { token: rahul.token })).status));
+    assert.ok([403, 404].includes((await api.post(`/marketing/projects/${project.id}/leads`, { company_name: 'X' }, { token: rahul.token })).status));
   });
 
   test('changing the status from the dropdown is recorded on the timeline', async () => {
