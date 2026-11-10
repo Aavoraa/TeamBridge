@@ -74,3 +74,32 @@ export async function backfillDeliveryRecords() {
   }
   return orphans.length;
 }
+
+/**
+ * A client typed by name, as the New project form sends it. Reuses the client
+ * already on the register under that name (any case), otherwise adds a plain
+ * one to the Clients page, where the rest of its details can be filled in later.
+ * Returns the `clients` row id that projects point at.
+ */
+export async function clientIdForName(tenantId, userId, rawName) {
+  const name = String(rawName || '').replace(/\s+/g, ' ').trim();
+  if (!name) return null;
+  let account = await get(
+    `SELECT * FROM client_accounts
+      WHERE tenant_id = ? AND deleted_at IS NULL AND LOWER(name) = LOWER(?)
+      ORDER BY status = 'archived', created_at LIMIT 1`,
+    [tenantId, name],
+  );
+  if (!account) {
+    const id = uuid();
+    const ts = nowIso();
+    await run(
+      `INSERT INTO client_accounts (id, tenant_id, name, status, owner_id, country, currency,
+         payment_terms_days, tags, created_at, updated_at)
+       VALUES (?,?,?, 'active', ?, 'India', 'INR', 30, '[]', ?, ?)`,
+      [id, tenantId, name, userId, ts, ts],
+    );
+    account = await get('SELECT * FROM client_accounts WHERE id = ?', [id]);
+  }
+  return ensureDeliveryRecord(tenantId, userId, account);
+}

@@ -77,10 +77,38 @@ describe('name matching', () => {
 });
 
 describe('who may use it, and who they may assign', () => {
-  test('employees and finance are refused', async () => {
+  test('employees and finance may use it for themselves: nobody to assign to', async () => {
     for (const who of [priyaR, meera]) {
       const res = await api.get('/assistant/task/people', { token: who.token });
-      assert.equal(res.status, 403);
+      assert.equal(res.status, 200);
+      assert.equal(res.body.data.mode, 'personal');
+      assert.deepEqual(res.body.data.people, []);
+    }
+  });
+
+  test('an employee gets a draft, but never a colleague matched to assign', async () => {
+    const res = await api.post('/assistant/task/interpret', { text: 'Ask Rahul to call the client' }, { token: priyaR.token });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.data.engine, 'none', 'no API key in tests');
+  });
+
+  test('an employee still cannot create an assistant task for anyone', async () => {
+    const res = await api.post('/action-items', assistantTask(rahul.user.id), { token: priyaR.token });
+    assert.equal(res.status, 403);
+  });
+
+  test('their own to-do goes on their private list', async () => {
+    const res = await api.post('/todos', { title: 'Call the client', due_time: '15:00', priority: 'high' }, { token: priyaR.token });
+    assert.equal(res.status, 201);
+    const mine = await api.get('/todos', { token: priyaR.token });
+    assert.ok(mine.body.data.some((t) => t.title === 'Call the client'));
+    const theirs = await api.get('/todos', { token: rahul.token });
+    assert.ok(!theirs.body.data.some((t) => t.title === 'Call the client'), 'nobody else sees it');
+  });
+
+  test('owners and managers stay in assign mode', async () => {
+    for (const token of [ownerToken, divya.token]) {
+      assert.equal((await api.get('/assistant/task/people', { token })).body.data.mode, 'assign');
     }
   });
 
@@ -223,9 +251,12 @@ describe('creating the confirmed task', () => {
     assert.equal(Number(n), 1);
   });
 
-  test('the ordinary task form is unchanged', async () => {
-    const res = await api.post('/action-items',
+  test('the ordinary task form follows the same rule: a manager assigns their own team', async () => {
+    const mine = await api.post('/action-items',
+      { title: 'Manual task from the form', owner_id: rahul.user.id }, { token: divya.token });
+    assert.equal(mine.status, 201, JSON.stringify(mine.body));
+    const outside = await api.post('/action-items',
       { title: 'Manual task from the form', owner_id: priyaS.user.id }, { token: divya.token });
-    assert.equal(res.status, 201, 'existing behaviour for non-assistant tasks is untouched');
+    assert.equal(outside.status, 403, 'Priya Shankar is not on her team');
   });
 });

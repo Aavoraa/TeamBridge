@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { workspaceToday } from './format';
+import { isNative } from './storage';
 
 /* ========================================================= SPEECH CAPTURE */
 /**
@@ -100,8 +101,19 @@ export function useSpeech({ lang = 'en-IN', onFinal }: {
 
   useEffect(() => () => rec.current?.abort(), []);
 
-  const start = useCallback(() => {
+  const start = useCallback(async () => {
     if (!Recognition || rec.current) return;
+    // In the app, speech recognition does not raise Android's microphone prompt
+    // by itself; asking for the mic does. The browser asks on its own.
+    if (isNative) {
+      try {
+        const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mic.getTracks().forEach((t) => t.stop());
+      } catch {
+        setError('TeamBridge needs the microphone. Allow it in your phone’s settings under Apps, TeamBridge, Permissions.');
+        return;
+      }
+    }
     const r = new Recognition();
     r.lang = lang;
     r.continuous = true;
@@ -121,10 +133,13 @@ export function useSpeech({ lang = 'en-IN', onFinal }: {
     };
     r.onerror = (e: any) => {
       setError(e.error === 'not-allowed' || e.error === 'service-not-allowed'
-        ? 'Microphone access is blocked — allow it from the lock icon in the address bar'
+        ? (isNative ? 'Voice input is not available on this phone. You can type the task instead.'
+          : 'Microphone access is blocked — allow it from the lock icon in the address bar')
         : e.error === 'no-speech' ? 'Didn’t hear anything — try again a little closer to the mic'
           : e.error === 'aborted' ? '' : `Voice input stopped (${e.error})`);
     };
+    // Android reports silence this way rather than as a no-speech error.
+    r.onnomatch = () => setError('Didn’t hear anything — try again a little closer to the mic');
     r.onend = () => {
       rec.current = null;
       setListening(false);

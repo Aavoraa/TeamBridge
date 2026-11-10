@@ -262,7 +262,7 @@ function AttendanceTab() {
             subtitle={`${today.data?.team?.length || 0} marked · ${today.data?.absent?.length || 0} not marked`}
             icon={<Users2 size={16} />}
             action={approver && (
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Button size="sm" icon={<Clock size={14} />} onClick={() => setTimingsOpen(true)}>Work timings</Button>
                 <Button size="sm" icon={<CalendarOff size={14} />} onClick={() => setHolidaysOpen(true)}>Holidays</Button>
                 <Button size="sm" icon={<Wifi size={14} />} onClick={() => setNetworksOpen('')}>Office networks</Button>

@@ -76,7 +76,9 @@ const allocationTone = (pct: number) => (pct > 100 ? 'negative' : pct >= 80 ? 'w
 
 /* =================================================================== PAGE */
 export default function Projects() {
-  const { can } = useAuth();
+  const { can, user } = useAuth();
+  // Managers (and the owner) look after people as well as projects.
+  const hasTeam = ['manager', 'owner', 'super_admin'].includes(user?.role || '');
   // Employees hold `view` on projects and nothing else. Rather than silently
   // dropping every button, say so once - otherwise the page just looks broken.
   const readOnly = !can('projects', 'create') && !can('projects', 'edit');
@@ -111,7 +113,7 @@ export default function Projects() {
           <span className="flex flex-wrap items-center gap-2">
             <span>
               {data
-                ? `${data.length} project${data.length === 1 ? '' : 's'} · ${staffed} staffed · every seat named`
+                ? `${data.length} project${data.length === 1 ? '' : 's'} · ${staffed} staffed`
                 : 'Build a team per project and name who manages, leads and delivers it'}
             </span>
             {readOnly && <Badge tone="neutral">Read-only · managers and admins make changes</Badge>}
@@ -127,24 +129,23 @@ export default function Projects() {
             { id: 'projects', label: 'Projects' },
             { id: 'updates', label: 'Daily updates' },
             { id: 'workload', label: 'Who is on what' },
+            ...(hasTeam ? [{ id: 'team', label: user?.role === 'manager' ? 'My team' : 'Team & staffing' }] : []),
           ]} />
         }
       />
 
       {tab === 'projects' && (
         <>
-          <Card className="mb-4">
-            <div className="flex flex-wrap items-center gap-2 p-3">
+          <div className="mb-5 flex flex-wrap items-center gap-2">
               <SearchInput value={search} onChange={setSearch} placeholder="Search project, code or client…"
-                className="flex-1 min-w-[220px]" />
+                className="flex-1 min-w-[220px] max-w-md" />
               <Select value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Status" className="w-[150px]">
                 <option value="">All statuses</option>
                 {['planned', 'active', 'on_hold', 'completed', 'cancelled'].map((s) => (
                   <option key={s} value={s}>{titleCase(s)}</option>
                 ))}
               </Select>
-            </div>
-          </Card>
+          </div>
 
           {error ? <ErrorState error={error} retry={refetch} />
             : isLoading ? <Card><TableSkeleton cols={6} /></Card>
@@ -159,7 +160,7 @@ export default function Projects() {
                     )} />
                 </Card>
               ) : (
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                   {data.map((p: any) => <ProjectCard key={p.id} project={p} onOpen={() => setOpenId(p.id)} />)}
                 </div>
               )}
@@ -168,6 +169,7 @@ export default function Projects() {
 
       {tab === 'updates' && <ProjectUpdatesTab onOpenProject={setOpenId} />}
       {tab === 'workload' && <WorkloadTab onOpenProject={setOpenId} />}
+      {tab === 'team' && hasTeam && <MyTeamTab onOpenProject={setOpenId} />}
 
       {createOpen && <CreateProjectModal onClose={() => setCreateOpen(false)} onCreated={setOpenId} />}
       {openId && <ProjectDrawer id={openId} onClose={close} />}
@@ -179,72 +181,51 @@ export default function Projects() {
 function ProjectCard({ project: p, onOpen }: { project: any; onOpen: () => void }) {
   const manager = p.team?.find((m: any) => m.seat === 'manager');
   const lead = p.team?.find((m: any) => m.seat === 'lead');
-  const others = p.team?.filter((m: any) => m.seat !== 'manager' && m.seat !== 'lead') ?? [];
+  const size = p.team_size || 0;
 
   return (
-    <Card className="flex flex-col">
-      <button onClick={onOpen} className="flex-1 p-4 text-left cursor-pointer">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="font-medium text-ink truncate">{p.name}</p>
-            <p className="text-[12.5px] text-subtle truncate">{p.client_name}</p>
-          </div>
-          <span className="flex shrink-0 items-center gap-1.5">
-            {p.kind === 'marketing' && <Badge tone="accent">Marketing</Badge>}
-            <StatusBadge status={p.status} />
-          </span>
-        </div>
-
-        <div className="mt-3.5 space-y-2">
-          <SeatLine seat="manager" member={manager} />
-          <SeatLine seat="lead" member={lead} />
-        </div>
-
-        {p.owners?.length > 0 && (
-          <p className="mt-3 text-[11.5px] text-subtle truncate" title="Project owners - they receive the daily updates">
-            <Crown size={11} className="mr-1 inline-block -mt-px" aria-hidden />
-            Owners: {p.owners.map((o: any) => o.name).join(', ')}
+    <button type="button" onClick={onOpen}
+      className="card group flex flex-col p-5 text-left cursor-pointer transition-[border-color,box-shadow]
+                 hover:border-[var(--border-strong)] hover:shadow-[0_4px_16px_rgba(15,23,42,0.06)]
+                 focus-visible:outline-2 focus-visible:outline-[var(--brand)]">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-[15px] font-semibold tracking-[-0.01em] text-ink">{p.name}</p>
+          <p className="mt-0.5 truncate text-[13px] text-subtle">
+            {p.client_name}{p.kind === 'marketing' ? ' · Marketing' : ''}
           </p>
-        )}
-
-        <div className="mt-3.5 flex items-center justify-between gap-3 border-t border-line pt-3">
-          <span className="flex items-center gap-2 min-w-0">
-            {others.length > 0 && <TeamStack team={others} />}
-            <span className="text-[12px] text-subtle truncate">
-              {p.team_size
-                ? `${p.team_size} on team${others.length ? ` · ${others.length} delivering` : ' · no one below the lead'}`
-                : 'Nobody staffed yet'}
-            </span>
-          </span>
-          <span className="text-[12px] tabular text-subtle shrink-0">{money(p.budget_minor, { compact: true })}</span>
         </div>
-      </button>
-    </Card>
+        <StatusBadge status={p.status} />
+      </div>
+
+      <dl className="mt-5 grid grid-cols-2 gap-4">
+        <SeatPerson label="Manager" member={manager} />
+        <SeatPerson label="Lead" member={lead} />
+      </dl>
+
+      <div className="mt-5 flex items-center justify-between gap-3 border-t border-line pt-4 text-[12.5px] text-subtle">
+        <span className="flex min-w-0 items-center gap-2">
+          {size > 0 && <TeamStack team={p.team} max={4} />}
+          <span className="truncate">{size ? `${size} member${size === 1 ? '' : 's'}` : 'No team yet'}</span>
+        </span>
+        {p.budget_minor > 0 && <span className="shrink-0 tabular">{money(p.budget_minor, { compact: true })}</span>}
+      </div>
+    </button>
   );
 }
 
-function SeatLine({ seat, member }: { seat: string; member?: any }) {
-  const ui = seatUi(seat);
-  const Icon = ui.icon;
+function SeatPerson({ label, member }: { label: string; member?: any }) {
   return (
-    <div className="flex items-center gap-2.5">
-      <span className={cx('grid h-7 w-7 shrink-0 place-items-center rounded-md',
-        member ? 'bg-sunken text-muted' : 'bg-sunken text-subtle')}>
-        <Icon size={14} aria-hidden />
-      </span>
-      {member ? (
-        <span className="min-w-0 flex-1">
-          <span className="flex items-baseline gap-1.5">
-            <span className="text-[13.5px] font-medium text-ink truncate">{member.name}</span>
-            <span className="text-[11.5px] text-subtle shrink-0">{ui.short}</span>
-          </span>
-          <span className="block text-[11.5px] text-subtle truncate">
-            {member.responsibility || member.designation || '—'}
-          </span>
-        </span>
-      ) : (
-        <span className="text-[12.5px] text-subtle">No {ui.short.toLowerCase()} assigned</span>
-      )}
+    <div className="min-w-0">
+      <dt className="text-[11.5px] text-subtle">{label}</dt>
+      <dd className="mt-1.5 flex min-w-0 items-center gap-2">
+        {member ? (
+          <>
+            <Avatar name={member.name} url={member.avatar_url} size={22} />
+            <span className="truncate text-[13px] font-medium text-ink">{member.name}</span>
+          </>
+        ) : <span className="text-[13px] text-subtle">Not assigned</span>}
+      </dd>
     </div>
   );
 }
@@ -311,13 +292,178 @@ function WorkloadTab({ onOpenProject }: { onOpenProject: (id: string) => void })
   );
 }
 
+/* ---------------------------------------------------------------- my team */
+/**
+ * A manager's own people at a glance: who reports to them, what each is on and
+ * in which seat, how much of their week is already spoken for, and how their
+ * tasks stand - with a one-step way to put someone on a project the manager runs.
+ */
+function MyTeamTab({ onOpenProject }: { onOpenProject: (id: string) => void }) {
+  const [search, setSearch] = useState('');
+  const [assigning, setAssigning] = useState<any>(null);
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['my-team'],
+    queryFn: () => api.get<any>('/projects/my-team').then((r) => r.data),
+  });
+
+  if (error) return <ErrorState error={error} retry={refetch} />;
+  if (isLoading || !data) return <Card><TableSkeleton cols={4} /></Card>;
+
+  const everyone = data.scope === 'everyone';
+  const q = search.trim().toLowerCase();
+  const people = (data.people as any[]).filter((u) => !q
+    || [u.name, u.designation, u.email].some((v: string) => v?.toLowerCase().includes(q)));
+  const idle = data.people.filter((u: any) => !u.projects.length).length;
+  const over = data.people.filter((u: any) => u.allocation_pct > 100).length;
+
+  if (!data.people.length) {
+    return (
+      <Card>
+        <EmptyState icon={<Users2 size={20} />} title="Nobody reports to you yet"
+          message="The workspace owner sets who reports to whom on the Team page. Your people show up here once they do." />
+      </Card>
+    );
+  }
+
+  return (
+    <>
+      <div className="mb-5 flex flex-wrap items-center gap-x-5 gap-y-2">
+        <SearchInput value={search} onChange={setSearch} placeholder="Search your team…" className="flex-1 min-w-[220px] max-w-md" />
+        <span className="text-[13px] text-muted">
+          <span className="font-semibold text-ink tabular">{data.people.length}</span> {everyone ? 'people' : `report${data.people.length === 1 ? 's' : ''} to you`}
+        </span>
+        <span className="text-[13px] text-muted"><span className="font-semibold text-ink tabular">{idle}</span> on no project</span>
+        {over > 0 && <span className="text-[13px] text-[var(--negative)]"><span className="font-semibold tabular">{over}</span> over 100%</span>}
+      </div>
+
+      <Card className="divide-y divide-line overflow-hidden">
+        {people.map((u: any) => {
+          const pct = Math.round(u.allocation_pct || 0);
+          return (
+            <div key={u.id} className="flex flex-col gap-3 px-4 py-4 lg:flex-row lg:items-center">
+              <div className="flex min-w-0 items-center gap-3 lg:w-[240px] lg:shrink-0">
+                <Avatar name={u.name} url={u.avatar_url} size={36} />
+                <div className="min-w-0">
+                  <p className="truncate text-[14px] font-medium text-ink">{u.name}</p>
+                  <p className="truncate text-[12.5px] text-subtle">{u.designation || titleCase(u.role)}</p>
+                </div>
+              </div>
+
+              <div className="min-w-0 flex-1">
+                {u.projects.length ? (
+                  <span className="flex flex-wrap gap-1.5">
+                    {u.projects.map((p: any) => (
+                      <button key={p.member_id} type="button" onClick={() => onOpenProject(p.project_id)}
+                        title={`${p.client_name}${p.responsibility ? ` · ${p.responsibility}` : ''}`}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-line px-2.5 py-1 text-[12.5px]
+                                   text-muted hover:border-line-strong cursor-pointer transition-colors">
+                        <span className="max-w-[180px] truncate text-ink">{p.project_name}</span>
+                        <span className="text-subtle">· {seatUi(p.seat).short}{p.allocation_pct ? ` · ${p.allocation_pct}%` : ''}</span>
+                      </button>
+                    ))}
+                  </span>
+                ) : <span className="text-[13px] text-subtle">Not on any project</span>}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-2 lg:shrink-0">
+                <span className="flex w-[118px] items-center gap-2" title="Share of their week across all projects">
+                  <Meter value={Math.min(pct, 100)} tone={allocationTone(pct)} className="w-14" />
+                  <span className={cx('text-[12.5px] tabular', pct > 100 ? 'font-medium text-[var(--negative)]' : 'text-muted')}>{pct}%</span>
+                </span>
+                <span className="w-[120px] text-[12.5px] text-muted tabular">
+                  {u.open_tasks} open task{u.open_tasks === 1 ? '' : 's'}
+                  {u.overdue_tasks > 0 && <span className="block text-[var(--negative)]">{u.overdue_tasks} overdue</span>}
+                </span>
+                <Button size="sm" icon={<Plus size={14} />} onClick={() => setAssigning(u)}>Add to project</Button>
+              </div>
+            </div>
+          );
+        })}
+        {!people.length && <p className="px-4 py-6 text-center text-[13px] text-subtle">Nobody on your team matches “{search}”.</p>}
+      </Card>
+
+      {assigning && <AssignToProjectModal person={assigning} projects={data.projects_i_run} onClose={() => setAssigning(null)} />}
+    </>
+  );
+}
+
+function AssignToProjectModal({ person, projects, onClose }: { person: any; projects: any[]; onClose: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const onIt = new Set(person.projects.map((p: any) => p.project_id));
+  const open = projects.filter((p) => !onIt.has(p.id));
+  const [form, setForm] = useState({ project_id: open.length === 1 ? open[0].id : '', seat: 'member', allocation_pct: '20', responsibility: '' });
+  const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const after = Math.round(person.allocation_pct || 0) + (Number(form.allocation_pct) || 0);
+
+  const add = useMutation({
+    mutationFn: () => api.post(`/projects/${form.project_id}/members`, {
+      user_id: person.id,
+      seat: form.seat,
+      allocation_pct: Math.max(0, Math.min(100, Number(form.allocation_pct) || 0)),
+      responsibility: form.responsibility.trim() || null,
+    }),
+    onSuccess: () => {
+      const name = projects.find((p) => p.id === form.project_id)?.name;
+      toast.success(`${person.name} is on ${name} as ${seatUi(form.seat).label.toLowerCase()}.`);
+      qc.invalidateQueries({ queryKey: ['my-team'] });
+      qc.invalidateQueries({ queryKey: ['projects'] });
+      qc.invalidateQueries({ queryKey: ['project', form.project_id] });
+      qc.invalidateQueries({ queryKey: ['project-workload'] });
+      onClose();
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  return (
+    <Modal open onClose={onClose} title={`Add ${person.name} to a project`}
+      subtitle="Pick the project, their seat on it and how much of their week it takes"
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" loading={add.isPending} disabled={!form.project_id} onClick={() => add.mutate()}>
+            Add to project
+          </Button>
+        </>
+      }>
+      {!projects.length ? (
+        <EmptyState compact icon={<FolderKanban size={18} />} title="You are not running a project yet"
+          message="You can put people on projects you manage or lead. Create a project, or ask the owner to make you its manager." />
+      ) : !open.length ? (
+        <EmptyState compact icon={<FolderKanban size={18} />} title={`${person.name} is already on all your projects`}
+          message="Change their seat or time from the project's Team tab." />
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Project" required className="sm:col-span-2">
+            <Select value={form.project_id} onChange={(e) => set('project_id', e.target.value)}>
+              <option value="">Choose a project…</option>
+              {open.map((p) => <option key={p.id} value={p.id}>{p.name} · {p.client_name}</option>)}
+            </Select>
+          </Field>
+          <Field label="Seat" hint={['manager', 'lead'].includes(form.seat) ? 'Replaces whoever holds this seat now' : undefined}>
+            <Select value={form.seat} onChange={(e) => set('seat', e.target.value)}>
+              {Object.entries(SEAT_UI).map(([id, ui]) => <option key={id} value={id}>{ui.label}</option>)}
+            </Select>
+          </Field>
+          <Field label="Time on it (%)" hint={after > 100 ? `That puts them at ${after}% of their week` : `Takes them to ${after}% of their week`}>
+            <Input type="number" min={0} max={100} step={5} value={form.allocation_pct} onChange={(e) => set('allocation_pct', e.target.value)} />
+          </Field>
+          <Field label="What they own here" className="sm:col-span-2">
+            <Input value={form.responsibility} onChange={(e) => set('responsibility', e.target.value)} placeholder="Front end and QA hand-off" />
+          </Field>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 /* ---------------------------------------------------------- new project */
 function CreateProjectModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
   const { user } = useAuth();
   const qc = useQueryClient();
   const toast = useToast();
   const [form, setForm] = useState({
-    client_id: '', name: '', code: '', service_line_id: '', model: 'project', status: 'active',
+    client_name: '', name: '', code: '', service_line_id: '', model: 'project', status: 'active',
     start_date: new Date().toISOString().slice(0, 10), end_date: '', budget: '',
     manager_id: '', lead_id: '', scope_total: '', kind: 'delivery',
   });
@@ -342,7 +488,7 @@ function CreateProjectModal({ onClose, onCreated }: { onClose: () => void; onCre
 
   const create = useMutation({
     mutationFn: () => api.post('/projects', {
-      client_id: form.client_id,
+      client_name: form.client_name.trim(),
       name: form.name.trim(),
       code: form.code || null,
       service_line_id: form.service_line_id || null,
@@ -376,20 +522,23 @@ function CreateProjectModal({ onClose, onCreated }: { onClose: () => void; onCre
         <>
           <Button onClick={onClose}>Cancel</Button>
           <Button variant="primary" loading={create.isPending}
-            disabled={!form.client_id || form.name.trim().length < 2 || !ownerIds.length}
+            disabled={!form.client_name.trim() || form.name.trim().length < 2 || !ownerIds.length}
             onClick={() => create.mutate()}>Create project</Button>
         </>
       }>
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Client" required error={errors.client_id} className="sm:col-span-2">
-          <Select value={form.client_id} onChange={(e) => set('client_id', e.target.value)}>
-            <option value="">Choose a client…</option>
-            {meta?.clients?.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </Select>
+        <Field label="Client" required error={errors.client_name} className="sm:col-span-2"
+          hint="Type the client's name. A new name is added to Clients for you.">
+          <Input value={form.client_name} onChange={(e) => set('client_name', e.target.value)}
+            placeholder="Sunrise Foods" list="project-client-names" autoComplete="off" maxLength={160} autoFocus />
+          {/* Existing clients are suggested as you type, so the same client is not entered twice. */}
+          <datalist id="project-client-names">
+            {meta?.clients?.map((c: any) => <option key={c.id} value={c.name} />)}
+          </datalist>
         </Field>
         <Field label="Project name" required error={errors.name} className="sm:col-span-2">
           <Input value={form.name} onChange={(e) => set('name', e.target.value)}
-            placeholder="Brand refresh & always-on marketing" autoFocus />
+            placeholder="Brand refresh & always-on marketing" />
         </Field>
         <Field label="Project type" className="sm:col-span-2"
           hint={form.kind === 'marketing' ? 'Carries a lead pipeline under Marketing leads' : 'Client delivery work'}>
@@ -485,9 +634,12 @@ function ProjectDrawer({ id, onClose }: { id: string; onClose: () => void }) {
     return <Drawer open onClose={onClose} title="Loading…"><div className="p-4"><TableSkeleton rows={4} cols={2} /></div></Drawer>;
   }
 
-  const editable = can('projects', 'edit');
   // The manager and the lead are the two who file the daily project update.
   const mySeat = p.team?.find((m: any) => m.user_id === user?.id)?.seat;
+  // The team is changed by the people running the project, or the workspace owner (the API holds the same rule).
+  const editable = can('projects', 'edit') && (['owner', 'super_admin'].includes(user?.role || '')
+    || mySeat === 'manager' || mySeat === 'lead' || p.manager_id === user?.id || p.lead_id === user?.id
+    || !!p.owners?.some((o: any) => o.user_id === user?.id || o.id === user?.id));
   const files = mySeat === 'manager' || mySeat === 'lead';
   // The server has the final word: a manager may only delete a project they run or own.
   const deletable = can('projects', 'delete') && (user?.role === 'owner'
@@ -497,15 +649,22 @@ function ProjectDrawer({ id, onClose }: { id: string; onClose: () => void }) {
     <>
       <Drawer open onClose={onClose} title={p.name} width="max-w-3xl"
         subtitle={
-          <span className="flex flex-wrap items-center gap-2">
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-subtle">
             <span className="text-muted">{p.client_name}</span>
+            <span aria-hidden>·</span>
+            <span>{titleCase(p.model)}</span>
+            {p.code && <><span aria-hidden>·</span><span className="mono text-[12px]">{p.code}</span></>}
             <StatusBadge status={p.status} />
-            <Badge tone="neutral">{titleCase(p.model)}</Badge>
-            {p.code && <span className="mono text-[12px] text-subtle">{p.code}</span>}
           </span>
         }
         footer={
           <>
+            {deletable && (
+              <Button variant="ghost" icon={<Trash2 size={15} />} onClick={() => setDeleting(true)}
+                className="mr-auto !text-[var(--negative)] hover:!bg-[color-mix(in_srgb,var(--negative)_8%,transparent)]">
+                Delete
+              </Button>
+            )}
             <Button icon={<Download size={15} />}
               onClick={() => api.download(`/projects/${id}/members/export/csv`, `${p.name}-team.csv`)}>
               Export team
@@ -523,15 +682,9 @@ function ProjectDrawer({ id, onClose }: { id: string; onClose: () => void }) {
                 Add to team
               </Button>
             )}
-            {deletable && (
-              <Button variant="danger" icon={<Trash2 size={15} />} onClick={() => setDeleting(true)}>
-                Delete project
-              </Button>
-            )}
           </>
         }>
-        <div className="flex items-center gap-2 border-b border-line px-5 py-2.5 text-[12.5px]">
-          <Crown size={13} className="text-subtle shrink-0" aria-hidden />
+        <div className="flex items-center gap-3 border-b border-line px-5 py-2.5 text-[13px]">
           <span className="text-subtle shrink-0">Owners</span>
           <span className="min-w-0 flex-1 truncate text-ink">
             {p.owners?.length ? p.owners.map((o: any) => o.name).join(', ') : <span className="text-[var(--warning)]">None assigned</span>}
@@ -545,7 +698,7 @@ function ProjectDrawer({ id, onClose }: { id: string; onClose: () => void }) {
 
         <div className="border-b border-line px-5">
           <Tabs active={tab} onChange={setTab} tabs={[
-            { id: 'team', label: `Team (${p.team_size})` },
+            { id: 'team', label: 'Team' },
             { id: 'updates', label: 'Daily updates' },
             { id: 'details', label: 'Project details' },
             ...(can('meetings', 'view') ? [{ id: 'meetings', label: 'Meetings' }] : []),
@@ -671,19 +824,21 @@ function TeamTab({ project: p, editable, onAdd }: { project: any; editable: bool
   return (
     <>
       <div className="p-5 space-y-5">
-        <div className="grid gap-3 grid-cols-3">
-          <StatBox label="On the team" value={String(p.team_size)} sub={`${overAllocated} with allocated time`} />
-          <StatBox label="Allocated effort" value={percent(p.allocation_total)} sub="sum across the team" />
-          <StatBox label="Open items" value={String(p.open_items ?? 0)} sub="not yet done" />
-        </div>
+        <Metrics items={[
+          { label: 'Members', value: String(p.team_size), sub: `${overAllocated} with time allocated` },
+          { label: 'Allocated', value: percent(p.allocation_total), sub: 'across the team' },
+          { label: 'Open items', value: String(p.open_items ?? 0), sub: 'not yet done' },
+        ]} />
 
         {p.team_by_seat.map((group: any) => (
           <section key={group.id}>
             <div className="mb-2 flex items-baseline justify-between gap-3">
-              <p className="label-cap">{group.label}{group.members.length > 1 ? `s (${group.members.length})` : ''}</p>
-              <p className="text-[11.5px] text-subtle truncate">{group.blurb}</p>
+              <p className="text-[12px] font-medium uppercase tracking-[0.06em] text-subtle">
+                {group.label}{group.members.length > 1 ? `s · ${group.members.length}` : ''}
+              </p>
+              <p className="hidden sm:block text-[12px] text-subtle truncate">{group.blurb}</p>
             </div>
-            <div className="space-y-2">
+            <div className="divide-y divide-line rounded-xl border border-line bg-raised">
               {group.members.map((m: any) => (
                 <MemberRow key={m.id} member={m} editable={editable}
                   editing={editingId === m.id}
@@ -711,14 +866,13 @@ function MemberRow({ member: m, editable, editing, onEdit, onPatch, onRemove }: 
   onEdit: () => void; onPatch: (patch: any) => void; onRemove: () => void;
 }) {
   return (
-    <div className="rounded-lg border border-line bg-raised">
-      <div className="flex items-center gap-3 p-3">
-        <Avatar name={m.name} url={m.avatar_url} size={34} />
+    <div className="group">
+      <div className="flex items-center gap-3 px-3.5 py-3">
+        <Avatar name={m.name} url={m.avatar_url} size={32} />
         <div className="min-w-0 flex-1">
           <p className="flex items-center gap-2 text-[13.5px] font-medium text-ink">
             <span className="truncate">{m.name}</span>
-            <SeatBadge seat={m.seat} />
-            {m.billable === 0 && <Badge tone="neutral">Non-billable</Badge>}
+            {m.billable === 0 && <span className="shrink-0 text-[11.5px] font-normal text-subtle">Non-billable</span>}
           </p>
           <p className="text-[12px] text-subtle truncate">
             {m.responsibility || m.designation || titleCase(m.org_role)}
@@ -730,7 +884,8 @@ function MemberRow({ member: m, editable, editing, onEdit, onPatch, onRemove }: 
           <span className="text-[12px] tabular text-subtle w-9 text-right">{percent(m.allocation_pct)}</span>
         </span>
         {editable && (
-          <span className="flex items-center gap-1 shrink-0">
+          <span className={cx('flex items-center gap-0.5 shrink-0 transition-opacity',
+            !editing && 'md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100')}>
             <Button variant="ghost" icon={<PencilLine size={15} />} onClick={onEdit} aria-label={`Edit ${m.name}`} />
             <Button variant="ghost" icon={<Trash2 size={15} />} onClick={onRemove} aria-label={`Remove ${m.name}`} />
           </span>
@@ -793,11 +948,11 @@ function DetailsTab({ project: p, editable }: { project: any; editable: boolean 
 
   return (
     <div className="p-5 space-y-5">
-      <div className="grid gap-3 grid-cols-3">
-        <StatBox label="Budget" value={money(p.budget_minor, { compact: true })} />
-        <StatBox label="Invoiced" value={money(p.invoiced_minor, { compact: true })} />
-        <StatBox label="Margin" value={percent(margin)} sub={`cost ${money(p.cost_minor, { compact: true })}`} />
-      </div>
+      <Metrics items={[
+        { label: 'Budget', value: money(p.budget_minor, { compact: true }) },
+        { label: 'Invoiced', value: money(p.invoiced_minor, { compact: true }) },
+        { label: 'Margin', value: percent(margin), sub: `cost ${money(p.cost_minor, { compact: true })}` },
+      ]} />
 
       <dl className="space-y-2.5 text-[13px]">
         <Row label="Client" value={p.client_name} onClick={() => navigate(`/crm/${p.client_id}`)} />
@@ -970,11 +1125,16 @@ function AddMemberModal({ project: p, onClose }: { project: any; onClose: () => 
 }
 
 /* ----------------------------------------------------------------- bits */
-const StatBox = ({ label, value, sub }: { label: string; value: string; sub?: string }) => (
-  <div className="rounded-lg bg-sunken p-3">
-    <p className="label-cap">{label}</p>
-    <p className="mt-1 text-[18px] font-semibold text-ink tabular">{value}</p>
-    {sub && <p className="text-[11.5px] text-subtle truncate">{sub}</p>}
+/** A quiet row of figures: no tiles, just thin dividers. */
+const Metrics = ({ items }: { items: { label: string; value: string; sub?: string }[] }) => (
+  <div className="grid grid-cols-3 divide-x divide-line rounded-xl border border-line">
+    {items.map((x) => (
+      <div key={x.label} className="min-w-0 px-4 py-3">
+        <p className="text-[12px] text-subtle truncate">{x.label}</p>
+        <p className="mt-1 text-[20px] font-semibold leading-none tracking-[-0.02em] text-ink tabular">{x.value}</p>
+        {x.sub && <p className="mt-1.5 text-[11.5px] text-subtle truncate">{x.sub}</p>}
+      </div>
+    ))}
   </div>
 );
 

@@ -15,6 +15,7 @@ import {
   workspaceToday, workspaceTime,
 } from '../lib/format';
 import { DailyUpdateModal, UpdateCard, NeedsUpdateRow } from '../components/DailyUpdate';
+import { RequestTaskModal, TaskRequestsView, assignsWork, useTaskRequestCount } from '../components/TaskRequests';
 import {
   Avatar, AvatarWithName, Badge, Button, Card, CardHeader, Checkbox, ConfirmDialog, Drawer,
   EmptyState, ErrorState, Field, Input, Modal, PageHeader, SearchInput, Select, StatusBadge,
@@ -159,7 +160,7 @@ export default function ActionItems() {
   // Four jobs on one screen: the register, work that is finished and waiting on
   // sign-off, my own daily updates, and - for a manager - the team's. The tab
   // lives in the URL so the reminder can link straight at it.
-  const TABS = ['tasks', 'completed', 'updates', 'team'];
+  const TABS = ['tasks', 'completed', 'updates', 'team', 'requests'];
   const tab = TABS.includes(params.get('tab') || '') ? params.get('tab')! : 'tasks';
   const setTab = (id: string) => {
     const next = new URLSearchParams(params);
@@ -169,11 +170,16 @@ export default function ActionItems() {
   };
   // Only somebody who can see beyond their own rows has a team to review.
   const canReviewTeam = user?.role !== 'employee' && user?.role !== 'client';
+  // Owners and managers hand out work. Everyone else requests a task for
+  // themselves, which their manager or project lead approves.
+  const assigns = assignsWork(user?.role);
+  const requestsWaiting = useTaskRequestCount();
+  const [requestOpen, setRequestOpen] = useState(false);
 
   const [view, setView] = useState<'list' | 'board'>('list');
   const [search, setSearch] = useState('');
   const [showFilters, setShowFilters] = useState(false);
-  const [createOpen, setCreateOpen] = useState(params.get('new') === '1');
+  const [createOpen, setCreateOpen] = useState(params.get('new') === '1' && assignsWork(user?.role));
   const [openId, setOpenId] = useState<string | null>(params.get('open'));
   const [selected, setSelected] = useState<string[]>([]);
   const [page, setPage] = useState(1);
@@ -218,7 +224,7 @@ export default function ActionItems() {
   const { data: meta } = useQuery({
     queryKey: ['action-item-meta'],
     queryFn: async () => {
-      const [categories, directory, clients, projects] = await Promise.all([
+      const [categories, directory, clients, projects, assignable] = await Promise.all([
         api.get('/settings/action-categories').then((r) => r.data),
         api.get('/users/directory').then((r) => r.data),
         // The whole client register, not the pipeline list: that one is filtered
@@ -227,8 +233,11 @@ export default function ActionItems() {
         // Teams come from the projects module - there is no second list of
         // teams to keep in step with it.
         api.get('/projects').then((r) => r.data).catch(() => []),
+        // Who this person may hand a task to: anyone for an owner, their team for
+        // a manager, nobody for everyone else. The API enforces the same list.
+        api.get<any>('/assistant/task/people').then((r) => r.data.people).catch(() => []),
       ]);
-      return { categories, directory, clients, projects };
+      return { categories, directory, clients, projects, assignable };
     },
     staleTime: 300_000,
   });
@@ -290,6 +299,7 @@ export default function ActionItems() {
             { id: 'completed', label: 'Completed', count: toValidate || undefined },
             { id: 'updates', label: 'My daily updates', count: owed || undefined },
             ...(canReviewTeam ? [{ id: 'team', label: 'Team updates' }] : []),
+            ...(user?.role !== 'client' ? [{ id: 'requests', label: 'Requests', count: requestsWaiting || undefined }] : []),
           ]} />
         }
         actions={tab !== 'tasks' ? null : (
@@ -315,11 +325,15 @@ export default function ActionItems() {
                 Export
               </Button>
             )}
-            {can('action_items', 'create') && (
+            {can('action_items', 'create') && (assigns ? (
               <Button variant="primary" icon={<Plus size={15} />} onClick={() => setCreateOpen(true)}>
                 New item
               </Button>
-            )}
+            ) : (
+              <Button variant="primary" icon={<Plus size={15} />} onClick={() => setRequestOpen(true)}>
+                Request a task
+              </Button>
+            ))}
           </>
         )}
       />
@@ -327,6 +341,7 @@ export default function ActionItems() {
       {tab === 'completed' && <CompletedView onOpen={setOpenId} />}
       {tab === 'updates' && <MyUpdatesView />}
       {tab === 'team' && canReviewTeam && <TeamUpdatesView />}
+      {tab === 'requests' && <TaskRequestsView />}
 
       {tab === 'tasks' && (
         <>
@@ -530,6 +545,7 @@ export default function ActionItems() {
           const next = new URLSearchParams(params); next.delete('new'); setParams(next, { replace: true });
         }} />
       )}
+      {requestOpen && <RequestTaskModal onClose={() => setRequestOpen(false)} onSent={() => setTab('requests')} />}
       {openId && <ItemDrawer id={openId} meta={meta} onClose={() => {
         setOpenId(null);
         const next = new URLSearchParams(params); next.delete('open'); setParams(next, { replace: true });
@@ -1001,11 +1017,11 @@ function CreateItemModal({ meta, onClose }: { meta: any; onClose: () => void }) 
   formRef.current = form;
   const voicePeople = () => (mode === 'team'
     ? (team || []).map((m: any) => ({ id: m.user_id, name: m.name }))
-    : meta?.directory || []);
+    : meta?.assignable || []);
   const applyVoice = (text: string) => {
     const people = mode === 'team'
       ? (team || []).map((m: any) => ({ id: m.user_id, name: m.name }))
-      : meta?.directory || [];
+      : meta?.assignable || [];
     const p = parseVoiceTask(text, {
       people, clients: meta?.clients || [], categories: meta?.categories || [], selfId: user?.id,
     });
@@ -1067,7 +1083,7 @@ function CreateItemModal({ meta, onClose }: { meta: any; onClose: () => void }) 
         )}
         {!interview && <VoiceTaskPanel onHeard={applyVoice} heard={heard}
           onPick={(id) => {
-            const who = [...(meta?.directory || []), ...(team || []).map((m: any) => ({ id: m.user_id, name: m.name }))]
+            const who = [...(meta?.assignable || []), ...(team || []).map((m: any) => ({ id: m.user_id, name: m.name }))]
               .find((u: any) => u.id === id);
             set('owner_id', id);
             setHeard((h) => h && ({ ...h, parsed: { ...h.parsed, owner_id: id, owner_name: who?.name } }));
@@ -1156,7 +1172,7 @@ function CreateItemModal({ meta, onClose }: { meta: any; onClose: () => void }) 
             <Select value={form.owner_id} onChange={(e) => set('owner_id', e.target.value)}>
               <option value="">{mode === 'team' ? 'Pick from the team…' : 'Choose a person…'}</option>
               {(mode === 'team' ? (team || []).map((m: any) => ({ id: m.user_id, name: m.name }))
-                : meta?.directory || []
+                : meta?.assignable || []
               ).filter((u: any) => u.id !== user?.id)
                 .map((u: any) => <option key={u.id} value={u.id}>{u.name}</option>)}
             </Select>
@@ -1710,12 +1726,16 @@ function ItemDrawer({ id, meta, onClose }: { id: string; meta: any; onClose: () 
                   {PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
                 </Select>
               </Field>
-              <Field label="Accountable" hint="One name answers for the due date">
-                <Select value={item.owner_id || ''} onChange={(e) => update.mutate({ owner_id: e.target.value || null })}>
+              <Field label="Accountable" hint={assignsWork(user?.role) ? 'One name answers for the due date' : 'Only owners and managers reassign tasks'}>
+                <Select value={item.owner_id || ''} disabled={!assignsWork(user?.role)}
+                  onChange={(e) => update.mutate({ owner_id: e.target.value || null })}>
                   <option value="">Unassigned</option>
-                  {meta?.directory
+                  {[
+                    ...(item.owner_id ? [{ id: item.owner_id, name: item.owner_name || 'Current owner' }] : []),
+                    ...(meta?.assignable || []).filter((u: any) => u.id !== item.owner_id),
+                  ]
                     // Whoever raised it cannot hand it to themselves.
-                    ?.filter((u: any) => !(item.created_by === user?.id && u.id === user?.id && item.owner_id !== u.id))
+                    .filter((u: any) => !(item.created_by === user?.id && u.id === user?.id && item.owner_id !== u.id))
                     .map((u: any) => <option key={u.id} value={u.id}>{u.name}</option>)}
                 </Select>
               </Field>

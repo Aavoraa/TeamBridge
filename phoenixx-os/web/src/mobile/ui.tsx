@@ -10,6 +10,7 @@ import { ReactNode, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 import { cx } from '../components/ui';
 import { MenuButton, ProfileButton } from './chrome';
+import VoiceTaskButton from '../components/VoiceTaskButton';
 
 type Tone = 'neutral' | 'brand' | 'positive' | 'negative' | 'warning' | 'info';
 
@@ -32,11 +33,10 @@ const TONE_SOFT: Record<Tone, string> = {
 };
 
 /**
- * A tab's page. The bar is fixed in shape across every screen — avatar left,
- * title, then the overflow menu on the right — so those two controls are always
- * in the same place under the thumb, which is the whole point of copying the
- * Teams arrangement. `action` is for a screen's own control and sits inboard of
- * the menu.
+ * A tab's page. The bar is fixed in shape across every screen: the side
+ * navigation on the left, the title, then voice-to-task and the profile on the
+ * right, so they are always in the same place under the thumb. `action` is for a
+ * screen's own control and sits just after the title.
  */
 export function Screen({ title, subtitle, action, children }: {
   title: string; subtitle?: ReactNode; action?: ReactNode; children: ReactNode;
@@ -44,14 +44,15 @@ export function Screen({ title, subtitle, action, children }: {
   return (
     <div className="min-h-full">
       <header className="sticky top-0 z-20 border-b border-line bg-raised/95 backdrop-blur px-3 pt-2.5 pb-2.5">
-        <div className="flex items-center gap-2.5">
-          <ProfileButton />
+        <div className="flex items-center gap-2">
+          <MenuButton />
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-[19px] font-semibold leading-tight text-ink">{title}</h1>
             {subtitle && <p className="truncate text-[12.5px] leading-snug text-subtle">{subtitle}</p>}
           </div>
           {action}
-          <MenuButton />
+          <VoiceTaskButton />
+          <ProfileButton />
         </div>
       </header>
       <div className="px-4 py-4 space-y-4">{children}</div>

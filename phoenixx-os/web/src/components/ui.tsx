@@ -119,15 +119,16 @@ export function CardHeader({ title, subtitle, action, icon, className }: {
   title: ReactNode; subtitle?: ReactNode; action?: ReactNode; icon?: ReactNode; className?: string;
 }) {
   return (
-    <div className={cx('flex items-start justify-between gap-3 px-5 pt-5 pb-3', className)}>
-      <div className="min-w-0 flex-1 flex items-center gap-2.5">
+    // Wraps: on a phone the controls drop below the title instead of crushing it.
+    <div className={cx('flex flex-wrap items-start justify-between gap-3 px-5 pt-5 pb-3', className)}>
+      <div className="min-w-[min(200px,100%)] flex-1 flex items-center gap-2.5">
         {icon && <span className="text-[var(--brand-vivid)] shrink-0">{icon}</span>}
         <div className="min-w-0">
           <h2 className="text-[17px] font-semibold text-ink leading-tight tracking-[-0.015em] truncate">{title}</h2>
           {subtitle && <p className="text-[13.5px] text-subtle mt-1 leading-snug break-words">{subtitle}</p>}
         </div>
       </div>
-      {action && <div className="shrink-0 flex items-center gap-2 text-[13.5px]">{action}</div>}
+      {action && <div className="max-w-full min-w-0 flex flex-wrap items-center gap-2 text-[13.5px]">{action}</div>}
     </div>
   );
 }
@@ -222,7 +223,7 @@ export function Stat({ label, value, sub, delta, tone, icon, onClick, className,
         )}
         <div className="min-w-0 flex-1">
           <p className="truncate text-[13.5px] text-subtle">{label}</p>
-          <div className="mt-0.5 flex items-end justify-between gap-2">
+          <div className="mt-0.5 flex flex-wrap items-end justify-between gap-x-2">
             <span className="text-[26px] leading-8 font-semibold tracking-[-0.025em] text-ink tabular">{value}</span>
             {spark && spark.length > 1 && <Sparkline data={spark} tone={hue} />}
           </div>
@@ -235,11 +236,43 @@ export function Stat({ label, value, sub, delta, tone, icon, onClick, className,
 }
 
 /* =============================================================== TABLE */
-export function Table({ children, className }: { children: ReactNode; className?: string }) {
-  // Wide tables scroll inside their own container; the page never scrolls sideways.
+export function Table({ children, className, keepColumns }: {
+  children: ReactNode; className?: string;
+  /** Keep real columns on a phone (scrolling sideways) where comparing down a column is the point. */
+  keepColumns?: boolean;
+}) {
+  const ref = useRef<HTMLTableElement>(null);
+
+  /**
+   * On a phone each row becomes a small card (see .rt in index.css), and every
+   * value needs its column's name beside it. Cells do not know their header, so
+   * the labels are copied here - and again whenever rows load or change, since a
+   * row can update without this component rendering.
+   */
+  useEffect(() => {
+    const table = ref.current;
+    if (!table || keepColumns) return undefined;
+    const label = () => {
+      const heads = [...table.querySelectorAll('thead tr:last-child th')].map((th) => th.textContent?.trim() || '');
+      table.querySelectorAll('tbody tr').forEach((tr) => {
+        let col = 0;
+        for (const cell of Array.from(tr.children) as HTMLTableCellElement[]) {
+          const name = cell.colSpan === 1 ? heads[col] : '';
+          if (name) { if (cell.dataset.label !== name) cell.dataset.label = name; } else if (cell.dataset.label) delete cell.dataset.label;
+          col += cell.colSpan || 1;
+        }
+      });
+    };
+    label();
+    const watch = new MutationObserver(label);
+    watch.observe(table, { childList: true, subtree: true });
+    return () => watch.disconnect();
+  }, [keepColumns]);
+
+  // Anything still too wide scrolls inside its own container; the page never scrolls sideways.
   return (
     <div className="overflow-x-auto">
-      <table className={cx('w-full text-sm border-collapse', className)}>{children}</table>
+      <table ref={ref} className={cx('w-full text-sm border-collapse', !keepColumns && 'rt', className)}>{children}</table>
     </div>
   );
 }
@@ -389,12 +422,39 @@ export function SearchInput({ value, onChange, placeholder = 'Search…', classN
   );
 }
 
+/**
+ * Android's back button closes the dialog on top rather than moving the page
+ * underneath it (lib/native.ts). Dialogs can stack, a confirm over a form, and
+ * only the topmost may answer, hence one shared list.
+ */
+const openLayers: object[] = [];
+function useBackCloses(open: boolean, onClose: () => void) {
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    if (!open) return undefined;
+    const me = {};
+    openLayers.push(me);
+    const onBack = (e: Event) => {
+      if (openLayers[openLayers.length - 1] !== me) return;
+      e.preventDefault();
+      close.current();
+    };
+    window.addEventListener('phoenixx:back', onBack);
+    return () => {
+      window.removeEventListener('phoenixx:back', onBack);
+      openLayers.splice(openLayers.indexOf(me), 1);
+    };
+  }, [open]);
+}
+
 /* =============================================================== MODAL */
 export function Modal({ open, onClose, title, subtitle, children, footer, size = 'md' }: {
   open: boolean; onClose: () => void; title: string; subtitle?: string;
   children: ReactNode; footer?: ReactNode; size?: 'sm' | 'md' | 'lg' | 'xl';
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  useBackCloses(open, onClose);
 
   useEffect(() => {
     if (!open) return;
@@ -435,7 +495,7 @@ export function Modal({ open, onClose, title, subtitle, children, footer, size =
           </button>
         </div>
         <div className="px-6 py-5 overflow-y-auto grow">{children}</div>
-        {footer && <div className="px-6 py-4 border-t border-line bg-raised rounded-b-[20px] flex justify-end gap-2 shrink-0">{footer}</div>}
+        {footer && <div className="px-6 py-4 border-t border-line bg-raised rounded-b-[20px] flex flex-wrap justify-end gap-2 shrink-0">{footer}</div>}
       </div>
     </div>,
     document.body,
@@ -447,6 +507,7 @@ export function Drawer({ open, onClose, title, subtitle, children, footer, width
   open: boolean; onClose: () => void; title: string; subtitle?: ReactNode;
   children: ReactNode; footer?: ReactNode; width?: string;
 }) {
+  useBackCloses(open, onClose);
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };

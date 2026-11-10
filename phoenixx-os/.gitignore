@@ -24,3 +24,14 @@ server/team.json
 # production-only settings sent with infra/aws/set-secrets.ps1
 .env.email
 *.env.email
+
+# the app's own web build, and Android build output
+dist-mobile/
+web/android/app/build/
+web/android/build/
+web/android/.gradle/
+web/android/local.properties
+*.keystore
+*.jks
+*.apk
+*.aab

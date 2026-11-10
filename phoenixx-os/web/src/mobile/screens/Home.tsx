@@ -9,7 +9,7 @@
  */
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlarmClock, Bell, CalendarClock, CheckCircle2, ClipboardList, Plus, ShieldCheck, Sun,
 } from 'lucide-react';
@@ -19,6 +19,7 @@ import {
   date as fmtDate, clockTime, workspaceToday, workspaceTime,
 } from '../../lib/format';
 import { useToast } from '../../components/ui';
+import { assignsWork } from '../../components/TaskRequests';
 import { HOME_KEY, useHomeFeed } from '../MobileApp';
 import {
   Empty, ErrorNote, List, Loading, MButton, MField, Pill, Row, Screen, Section, Sheet, inputClass,
@@ -90,7 +91,7 @@ export default function MobileHome() {
 
         <div className="grid grid-cols-2 gap-3">
           <MButton variant="primary" full icon={<Plus size={17} />} onClick={() => setCreateOpen(true)}>
-            New task
+            {assignsWork(user?.role) ? 'New task' : 'Request task'}
           </MButton>
           <MButton full icon={<ShieldCheck size={17} />} onClick={() => nav('/m/hr')}>
             Approvals{approvals > 0 ? ` (${approvals})` : ''}
@@ -219,9 +220,22 @@ const nextHour = () => {
   return h >= 22 ? '23:59' : `${String(h + 1).padStart(2, '0')}:00`;
 };
 
+/**
+ * Owners and managers hand the task to someone on their team. Everyone else
+ * asks for it: the request goes to their manager or project lead to approve.
+ */
 function CreateTaskSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
+  const { user } = useAuth();
+  const assigns = assignsWork(user?.role);
+  const [ownerId, setOwnerId] = useState('');
+  const { data: people } = useQuery({
+    queryKey: ['assignable-people'],
+    queryFn: () => api.get<any>('/assistant/task/people').then((r) => r.data.people as any[]),
+    enabled: open && assigns,
+    staleTime: 300_000,
+  });
   const [title, setTitle] = useState('');
   const [dueDate, setDueDate] = useState(workspaceToday());
   // The sheet opens on today, so it opens needing a time. An hour ahead, on the
@@ -237,15 +251,18 @@ function CreateTaskSheet({ open, onClose }: { open: boolean; onClose: () => void
         : '';
 
   const create = useMutation({
-    mutationFn: () => api.post('/action-items', {
+    mutationFn: () => api.post(assigns ? '/action-items' : '/task-requests', {
       title: title.trim(),
       due_date: dueDate || null,
       due_time: dueDate ? (dueTime || null) : null,
       priority,
+      ...(assigns ? { owner_id: ownerId } : {}),
     }),
     onSuccess: () => {
-      toast.success('Task created.');
+      toast.success(assigns ? 'Task assigned.' : 'Sent for approval.');
       qc.invalidateQueries({ queryKey: HOME_KEY });
+      qc.invalidateQueries({ queryKey: ['task-requests'] });
+      setOwnerId('');
       setTitle('');
       setPriority('medium');
       setDueTime(nextHour());
@@ -256,14 +273,22 @@ function CreateTaskSheet({ open, onClose }: { open: boolean; onClose: () => void
 
   return (
     <Sheet
-      open={open} onClose={onClose} title="New task"
+      open={open} onClose={onClose} title={assigns ? 'New task' : 'Request a task'}
       footer={(
         <MButton variant="primary" full loading={create.isPending}
-          disabled={title.trim().length < 2 || !!dueProblem} onClick={() => create.mutate()}>
-          Create task
+          disabled={title.trim().length < 2 || !!dueProblem || (assigns && !ownerId)} onClick={() => create.mutate()}>
+          {assigns ? 'Assign task' : 'Send for approval'}
         </MButton>
       )}
     >
+      {assigns && (
+        <MField label="Assign to">
+          <select className={inputClass} value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
+            <option value="">Choose a person…</option>
+            {people?.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </MField>
+      )}
       <MField label="What needs doing?">
         <input className={inputClass} value={title} autoFocus
           placeholder="Send the Q3 proposal to Zenith"
@@ -308,8 +333,9 @@ function CreateTaskSheet({ open, onClose }: { open: boolean; onClose: () => void
       </MField>
 
       <p className="text-[12px] leading-relaxed text-subtle">
-        It is assigned to you and lands in the same list the web app uses. Reassign it there if it
-        belongs to someone else.
+        {assigns
+          ? 'They are notified, and it lands on the same task list the web app uses.'
+          : 'Your manager or project lead approves it, then it joins your tasks. Track it under Tasks → Requests on the web.'}
       </p>
     </Sheet>
   );

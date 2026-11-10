@@ -16,6 +16,8 @@ import {
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Button, cx } from '../components/ui';
+import { applyStatusBarTheme } from '../lib/native';
+import { store } from '../lib/storage';
 
 /**
  * The live room for an AI Meeting.
@@ -49,9 +51,15 @@ export default function MeetingRoom() {
   const [everConnected, setEverConnected] = useState(false);
   const [failure, setFailure] = useState('');
 
+  // The room is always dark, so the installed app's status bar icons must be light while here.
+  useEffect(() => {
+    void applyStatusBarTheme(true);
+    return () => { void applyStatusBarTheme(store.get('phoenixx.theme') === 'dark'); };
+  }, []);
+
   const q = useQuery({ queryKey: ['ai-meetings', 'meeting', id], queryFn: () => api.get<any>(`/ai-meetings/${id}`).then((r) => r.data) });
   const m = q.data;
-  const needsConsent = !!(m && (m.recording_allowed || m.transcription_allowed));
+  const needsConsent =!!(m && (m.recording_allowed || m.transcription_allowed));
 
   const requestJoin = async (values: LocalUserChoices) => {
     setChoices(values);
@@ -281,6 +289,13 @@ function RoomView({ meeting, capture, initial, deviceNote, onDismissNote }: {
   const clock = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}`;
   useEffect(() => { if (!notice) return; const t = setTimeout(() => setNotice(''), 4500); return () => clearTimeout(t); }, [notice]);
 
+  // Android's back button (lib/native.ts): an accidental press must not drop someone from a call.
+  useEffect(() => {
+    const stay = (e: Event) => { e.preventDefault(); setNotice('You are still in the meeting. Use the red button to leave.'); };
+    window.addEventListener('phoenixx:back', stay);
+    return () => window.removeEventListener('phoenixx:back', stay);
+  }, []);
+
   return (
     <>
       <header className="flex items-center gap-3 px-4 py-2.5 border-b border-white/10">
@@ -360,10 +375,13 @@ function RoomView({ meeting, capture, initial, deviceNote, onDismissNote }: {
         <TrackToggle source={Track.Source.Camera} className="phx-ctl" showIcon>
           <span className="hidden md:inline">Camera</span>
         </TrackToggle>
-        <TrackToggle source={Track.Source.ScreenShare} className="phx-ctl" showIcon captureOptions={{ audio: true, selfBrowserSurface: 'exclude' }}
-          onDeviceError={() => setNotice('Screen sharing was cancelled or is not allowed in this browser.')}>
-          <span className="hidden md:inline">{localParticipant.isScreenShareEnabled ? 'Stop sharing' : 'Share screen'}</span>
-        </TrackToggle>
+        {/* Phones and the installed Android app have no screen capture; a button that always fails is worse than none. */}
+        {typeof navigator.mediaDevices?.getDisplayMedia === 'function' && (
+          <TrackToggle source={Track.Source.ScreenShare} className="phx-ctl" showIcon captureOptions={{ audio: true, selfBrowserSurface: 'exclude' }}
+            onDeviceError={() => setNotice('Screen sharing was cancelled or is not allowed in this browser.')}>
+            <span className="hidden md:inline">{localParticipant.isScreenShareEnabled ? 'Stop sharing' : 'Share screen'}</span>
+          </TrackToggle>
+        )}
         <button type="button" onClick={toggleHand} aria-pressed={raised} className={cx('phx-ctl', raised && 'phx-ctl-hand')}>
           <Hand size={18} /> <span className="hidden md:inline">{raised ? 'Lower hand' : 'Raise hand'}</span>
         </button>

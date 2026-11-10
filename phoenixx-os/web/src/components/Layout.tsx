@@ -6,20 +6,16 @@ import {
   Sun, Moon, Search, ShieldCheck, ChevronDown, CreditCard, Clock, AlertTriangle, Target, CheckCircle2, FolderKanban,
   Megaphone, MessagesSquare, Contact, FileSpreadsheet, History, Send, Landmark, ClipboardList, Sparkles, AudioLines,
   Video, CalendarPlus, LogIn, CalendarClock, CalendarDays, ListChecks, Building2, UserRound, ArrowRight, MessageSquare,
-  SquareUser, Presentation,
+  SquareUser, Presentation, LayoutDashboard,
 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { PushBanner, PushToggle, usePushMessages } from './PushControls';
 import { api } from '../lib/api';
-import { store } from '../lib/storage';
+import { isNative, store } from '../lib/storage';
 import { Wordmark } from './Logo';
 import { applyStatusBarTheme } from '../lib/native';
 import { Avatar, Badge, Button, cx, EmptyState } from './ui';
-
-// Loaded on first open: most sessions never use it.
-const TaskAssistant = lazy(() => import('./TaskAssistant'));
-/** Roles that hand out work get the AI Task Assistant in the top bar. */
-const ASSISTANT_ROLES = ['owner', 'manager', 'super_admin'];
+import VoiceTaskButton from './VoiceTaskButton';
 import { relative } from '../lib/format';
 import TodoReminders from './TodoReminders';
 
@@ -151,14 +147,52 @@ function activeOf(items: NavItem[], pathname: string, search: string) {
 
 /* =================================================================== SHELL */
 export default function Layout() {
-  const { user, subscription, can, signOut } = useAuth();
+  const { signOut } = useAuth();
   const { dark, toggle } = useTheme();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const location = useLocation();
-  const navigate = useNavigate();
   usePushMessages();
 
-  useEffect(() => { setSidebarOpen(false); }, [location.pathname]);
+  return (
+    <div className="min-h-full flex bg-surface">
+      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+
+      {/* ------------------------------------------------------------- main */}
+      <div className="flex-1 min-w-0 flex flex-col">
+        <TopBar onMenu={() => setSidebarOpen(true)} dark={dark} toggleTheme={toggle} signOut={signOut} />
+        <main className="flex-1 min-w-0 px-4 pt-3 pb-10 sm:px-8 max-w-[1600px] w-full mx-auto">
+          <PushBanner />
+          <Outlet />
+        </main>
+        <TodoReminders />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The side navigation. A permanent column on a wide screen and a slide-in drawer
+ * on a narrow one; the phone shell (/m) passes `drawerOnly` so it stays a drawer
+ * at every width, since that shell has no room reserved for a column.
+ */
+export function Sidebar({ open: drawerOpen, onClose, drawerOnly }: {
+  open: boolean; onClose: () => void; drawerOnly?: boolean;
+}) {
+  const { user, subscription, can, signOut } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // Going somewhere closes the drawer (it stays open if the path did not change).
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => { closeRef.current(); }, [location.pathname, location.search]);
+
+  // Android's back button closes the drawer before it leaves the page (lib/native.ts).
+  useEffect(() => {
+    if (!drawerOpen) return undefined;
+    const onBack = (e: Event) => { e.preventDefault(); closeRef.current(); };
+    window.addEventListener('phoenixx:back', onBack);
+    return () => window.removeEventListener('phoenixx:back', onBack);
+  }, [drawerOpen]);
 
   const { data: home } = useQuery({
     queryKey: ['home-counters'],
@@ -202,28 +236,41 @@ export default function Layout() {
   const plan = String(subscription?.plan_name || '');
   const showUpgrade = can('billing', 'view') && (subscription?.status === 'trial' || !/pro|enterprise|business|scale|premium/i.test(plan));
 
+  // In the app "/" is the phone Home, so the entries for it differ: Home and the
+  // dashboard are separate pages, and Chat opens the phone's own chat. No upgrade
+  // pitch in the drawer either: there is little height to spare on a phone.
+  const phoneShell = !!drawerOnly || isNative;
+  const entries: NavGroup[] = phoneShell
+    ? [
+      { label: 'Home', icon: House, item: { to: '/m', label: 'Home', exact: true } },
+      { label: 'Dashboard', icon: LayoutDashboard, item: { to: '/overview', label: 'Dashboard' } },
+      ...NAV.filter((g) => g.label !== 'Dashboard').map((g) => (g.label === 'Chat' && g.item
+        ? { ...g, item: { ...g.item, to: '/m/chat' } } : g)),
+    ]
+    : NAV;
+
   return (
-    <div className="min-h-full flex bg-surface">
-      {/* ---------------------------------------------------------- sidebar */}
-      {sidebarOpen && (
-        <div className="fixed inset-0 z-30 bg-slate-950/40 lg:hidden" onClick={() => setSidebarOpen(false)} aria-hidden />
+    <>
+      {drawerOpen && (
+        <div className={cx('fixed inset-0 z-30 bg-slate-950/40', !drawerOnly && 'lg:hidden')} onClick={onClose} aria-hidden />
       )}
 
       <aside className={cx(
         'fixed inset-y-0 left-0 z-40 w-[264px] shrink-0 border-r border-line bg-raised',
-        'flex flex-col transition-transform duration-200 lg:translate-x-0 lg:sticky lg:top-0 lg:h-screen no-print',
-        sidebarOpen ? 'translate-x-0' : '-translate-x-full',
+        'flex flex-col transition-transform duration-200 no-print',
+        !drawerOnly && 'lg:translate-x-0 lg:sticky lg:top-0 lg:h-screen',
+        drawerOpen ? 'translate-x-0' : '-translate-x-full',
       )}>
         <div className="flex items-center justify-between px-7 h-[84px] shrink-0">
-          <Link to="/" aria-label="TeamBridge home"><Wordmark size={34} /></Link>
-          <button className="lg:hidden text-subtle hover:text-ink cursor-pointer" onClick={() => setSidebarOpen(false)} aria-label="Close menu">
+          <Link to={phoneShell ? '/m' : '/'} aria-label="TeamBridge home" onClick={onClose}><Wordmark size={34} /></Link>
+          <button className={cx('text-subtle hover:text-ink cursor-pointer', !drawerOnly && 'lg:hidden')} onClick={onClose} aria-label="Close menu">
             <X size={20} />
           </button>
         </div>
 
         <nav className="flex-1 overflow-y-auto px-4 pb-4" aria-label="Main">
           <ul className="space-y-1">
-            {NAV.map((group) => {
+            {entries.map((group) => {
               if (group.item) {
                 if (!visible(group.item)) return null;
                 const active = matches(group.item, location.pathname, location.search);
@@ -284,7 +331,7 @@ export default function Layout() {
           </ul>
         </nav>
 
-        {showUpgrade && (
+        {showUpgrade && !phoneShell && (
           <div className="mx-4 mb-4 rounded-2xl bg-sunken px-4 py-5 text-center">
             <Sparkles size={24} className="mx-auto text-[var(--brand-vivid)]" fill="currentColor" strokeWidth={1.2} />
             <p className="mt-2.5 text-[16px] font-semibold tracking-[-0.01em] text-ink">
@@ -303,17 +350,7 @@ export default function Layout() {
 
         <UserCard signOut={signOut} />
       </aside>
-
-      {/* ------------------------------------------------------------- main */}
-      <div className="flex-1 min-w-0 flex flex-col">
-        <TopBar onMenu={() => setSidebarOpen(true)} dark={dark} toggleTheme={toggle} signOut={signOut} />
-        <main className="flex-1 min-w-0 px-4 pt-3 pb-10 sm:px-8 max-w-[1600px] w-full mx-auto">
-          <PushBanner />
-          <Outlet />
-        </main>
-        <TodoReminders />
-      </div>
-    </div>
+    </>
   );
 }
 
@@ -394,8 +431,6 @@ function TopBar({ onMenu, dark, toggleTheme, signOut }: {
   const { user, tenant, can } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
-  const [assistantOpen, setAssistantOpen] = useState(false);
-  const canAssist = ASSISTANT_ROLES.includes(user?.role || '');
   const navigate = useNavigate();
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -417,18 +452,7 @@ function TopBar({ onMenu, dark, toggleTheme, signOut }: {
       <GlobalSearch />
 
       <div className="ml-auto flex items-center gap-1.5 sm:gap-2.5">
-        {canAssist && (
-          <button onClick={() => setAssistantOpen(true)} aria-label="Open the AI Task Assistant" title="AI Task Assistant"
-            className="inline-flex h-10 items-center gap-1.5 rounded-full bg-brand-soft px-3.5 text-[13.5px] font-medium text-[var(--brand)] hover:brightness-[0.97] transition cursor-pointer">
-            <Sparkles size={16} />
-            <span className="hidden md:inline">Assign by voice</span>
-          </button>
-        )}
-        {canAssist && assistantOpen && (
-          <Suspense fallback={null}>
-            <TaskAssistant open={assistantOpen} onClose={() => setAssistantOpen(false)} />
-          </Suspense>
-        )}
+        <VoiceTaskButton />
 
         <NotificationBell open={bellOpen} setOpen={setBellOpen} />
 

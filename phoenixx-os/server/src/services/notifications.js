@@ -176,6 +176,19 @@ export const DEFAULT_TEMPLATES = {
     subject: 'New task assigned from meeting: {{title}}',
     body: 'Hi {{user.name}}, a new task has been assigned to you based on the {{meeting_title}} meeting. Task: {{title}}. Deadline: {{deadline_label}}. Assigned by: {{assigned_by}}. Source: {{meeting_title}}. Please check your task dashboard for details.',
   },
+  // Task requests: an employee asks to take a task on; their manager or project lead decides.
+  'task_request.submitted': {
+    subject: 'Task request from {{person}}: {{title}}',
+    body: 'Hi {{user.name}}, {{person}} has asked to take on a task: "{{title}}". {{due_line}} Approve it to add it to their tasks, or reject it with a reason.',
+  },
+  'task_request.approved': {
+    subject: 'Task approved: {{title}}',
+    body: 'Hi {{user.name}}, {{person}} has approved your task request "{{title}}". It is now on your task list.',
+  },
+  'task_request.rejected': {
+    subject: 'Task request not approved: {{title}}',
+    body: 'Hi {{user.name}}, {{person}} did not approve your task request "{{title}}". Reason: {{note}}',
+  },
   'action_item.assigned': {
     subject: 'New task assigned: {{title}}',
     body: 'Hi {{user.name}}, {{assigned_by}} has assigned you a new task: "{{title}}". Priority: {{priority_label}}. {{due_line}} Please check your task dashboard for details.',

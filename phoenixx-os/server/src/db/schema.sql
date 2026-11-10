@@ -2180,3 +2180,33 @@ CREATE TABLE IF NOT EXISTS meeting_recordings (
 CREATE INDEX IF NOT EXISTS ix_mrec_meeting ON meeting_recordings(meeting_id, kind);
 CREATE UNIQUE INDEX IF NOT EXISTS ux_mrec_egress ON meeting_recordings(egress_id) WHERE egress_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS ux_mrec_track ON meeting_recordings(meeting_id, track_sid) WHERE track_sid IS NOT NULL;
+
+-- ------------------------------------------------------------ TASK REQUESTS
+-- A task someone asks to take on themselves. Employees do not assign work, so
+-- a task for their own list goes to their reporting manager, and to the lead
+-- and manager of the project it is for, and the first of them to decide wins.
+-- Approval creates an ordinary action item owned by the requester and raised
+-- by the approver, who then signs off the finished work. `approver_ids` is the
+-- list as it stood when the request was made, so a later org change does not
+-- move a request already waiting on someone.
+CREATE TABLE IF NOT EXISTS task_requests (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id),
+  requester_id TEXT NOT NULL REFERENCES users(id),
+  title TEXT NOT NULL,
+  description TEXT,
+  project_id TEXT REFERENCES projects(id),
+  priority TEXT NOT NULL DEFAULT 'medium',  -- low|medium|high|urgent
+  due_date TEXT,
+  due_time TEXT,
+  approver_ids TEXT NOT NULL DEFAULT '[]',  -- JSON array of user ids
+  status TEXT NOT NULL DEFAULT 'pending',   -- pending|approved|rejected|withdrawn
+  decided_by TEXT REFERENCES users(id),
+  decided_at TEXT,
+  decision_note TEXT,
+  action_item_id TEXT REFERENCES action_items(id),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_taskreq_requester ON task_requests(tenant_id, requester_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS ix_taskreq_status ON task_requests(tenant_id, status, created_at DESC);

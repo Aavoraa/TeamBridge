@@ -1,97 +1,38 @@
 /**
- * The app bar's two permanent controls, Teams-style: the profile avatar on the
- * left and the overflow menu on the right.
- *
- * Both sheets are mounted once by the shell rather than per screen, so tapping
- * the avatar on Home and on HR opens the same sheet in the same state. Screens
- * reach them through this context instead of each holding their own copy.
+ * The app bar's permanent controls: the side navigation and the profile avatar.
+ * The drawer and the profile sheet are mounted once by the shell rather than per
+ * screen, so every tab opens the same ones in the same state. Screens reach them
+ * through this context instead of each holding their own copy.
  */
-import { ReactNode, createContext, useContext, useMemo, useState } from 'react';
+import { ReactNode, createContext, useCallback, useContext, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  BarChart3, BookOpenCheck, Building2, CalendarDays, ChevronRight, Clock, CreditCard, FileText,
-  FolderKanban, Globe, ListChecks, LogOut, Moon, Receipt, Settings, ShieldCheck, Sun, Target,
-  Users2, Wallet,
-} from 'lucide-react';
+import { ChevronRight, Globe, LogOut, Menu, Moon, Settings, Sun } from 'lucide-react';
 import { useAuth } from '../lib/auth';
-import { useTheme } from '../components/Layout';
+import { isNative } from '../lib/storage';
+import { Sidebar, useTheme } from '../components/Layout';
 import { useStockPhoto, avatarTint } from '../lib/avatar';
 import { Sheet } from './sheet';
 
-type Chrome = { openProfile: () => void; openMore: () => void };
+type Chrome = { openProfile: () => void; openNav: () => void };
 
-const ChromeContext = createContext<Chrome>({ openProfile: () => {}, openMore: () => {} });
+const ChromeContext = createContext<Chrome>({ openProfile: () => {}, openNav: () => {} });
 export const useChrome = () => useContext(ChromeContext);
-
-/**
- * Everything the web app has that is worth reaching from a phone, in the same
- * grouping the desktop sidebar uses so the two do not have to be learned twice.
- * `module` is checked against the caller's permissions — an employee never sees
- * an invoices row they would only be refused at.
- */
-const MORE: { section: string; items: { to: string; label: string; icon: any; module?: string }[] }[] = [
-  {
-    section: 'Work',
-    items: [
-      { to: '/action-items', label: 'All action items', icon: ListChecks, module: 'action_items' },
-      { to: '/meetings', label: 'Meetings & MOM', icon: CalendarDays, module: 'meetings' },
-      { to: '/deadlines', label: 'Deadlines', icon: Clock, module: 'deadlines' },
-    ],
-  },
-  {
-    section: 'Clients',
-    items: [
-      { to: '/crm', label: 'CRM pipeline', icon: Users2, module: 'crm' },
-      { to: '/proposals', label: 'Proposals', icon: FileText, module: 'proposals' },
-      { to: '/projects', label: 'Projects & teams', icon: FolderKanban, module: 'crm' },
-    ],
-  },
-  {
-    section: 'Money',
-    items: [
-      { to: '/invoices', label: 'Invoices', icon: Receipt, module: 'invoices' },
-      { to: '/finance', label: 'Cost & profit', icon: Wallet, module: 'costs' },
-    ],
-  },
-  {
-    section: 'People',
-    items: [
-      { to: '/hr', label: 'HR records', icon: Building2, module: 'hr_attendance' },
-      { to: '/team', label: 'Team directory', icon: Users2, module: 'employees' },
-    ],
-  },
-  {
-    section: 'Standards & insight',
-    items: [
-      { to: '/sop', label: 'SOP & KPI', icon: BookOpenCheck, module: 'sop' },
-      { to: '/dashboard', label: 'Traction dashboard', icon: Target, module: 'dashboard' },
-      { to: '/reports', label: 'Reports', icon: BarChart3, module: 'reports' },
-    ],
-  },
-  {
-    section: 'Workspace',
-    items: [
-      { to: '/settings', label: 'Settings', icon: Settings, module: 'settings' },
-      { to: '/billing', label: 'Billing & plan', icon: CreditCard, module: 'billing' },
-      { to: '/admin', label: 'Platform console', icon: ShieldCheck, module: 'platform' },
-    ],
-  },
-];
 
 export function MobileChrome({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState(false);
-  const [more, setMore] = useState(false);
+  const [nav, setNav] = useState(false);
 
+  const closeNav = useCallback(() => setNav(false), []);
   const value = useMemo<Chrome>(() => ({
     openProfile: () => setProfile(true),
-    openMore: () => setMore(true),
+    openNav: () => setNav(true),
   }), []);
 
   return (
     <ChromeContext.Provider value={value}>
       {children}
       <ProfileSheet open={profile} onClose={() => setProfile(false)} />
-      <MoreSheet open={more} onClose={() => setMore(false)} />
+      <Sidebar drawerOnly open={nav} onClose={closeNav} />
     </ChromeContext.Provider>
   );
 }
@@ -119,21 +60,16 @@ export function ProfileButton() {
   );
 }
 
-/* -------------------------------------------------------- the ⋮ control */
+/* ------------------------------------------------- the side navigation */
 
 export function MenuButton() {
-  const { openMore } = useChrome();
+  const { openNav } = useChrome();
   return (
     <button
-      type="button" onClick={openMore} aria-label="More"
+      type="button" onClick={openNav} aria-label="Open navigation"
       className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-ink active:bg-sunken"
     >
-      {/* Three dots drawn rather than imported so they match Teams' spacing. */}
-      <span className="flex flex-col items-center gap-[3px]">
-        <span className="block h-[3.5px] w-[3.5px] rounded-full bg-current" />
-        <span className="block h-[3.5px] w-[3.5px] rounded-full bg-current" />
-        <span className="block h-[3.5px] w-[3.5px] rounded-full bg-current" />
-      </span>
+      <Menu size={22} />
     </button>
   );
 }
@@ -143,10 +79,10 @@ export function MenuButton() {
 function ProfileSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { user, tenant, subscription, signOut } = useAuth();
   const { dark, toggle } = useTheme();
-  const nav = useNavigate();
+  const navigate = useNavigate();
   const name = user?.name || '?';
 
-  const go = (to: string) => { onClose(); nav(to); };
+  const go = (to: string) => { onClose(); navigate(to); };
 
   return (
     <Sheet open={open} onClose={onClose} title="You">
@@ -183,12 +119,15 @@ function ProfileSheet({ open, onClose }: { open: boolean; onClose: () => void })
           <ChevronRight size={17} className="text-subtle" />
         </button>
 
-        <button type="button" onClick={() => go('/')}
-          className="flex w-full min-h-[52px] items-center gap-3 px-3.5 py-3 text-left active:bg-sunken">
-          <Globe size={18} className="text-subtle" />
-          <span className="flex-1 text-[15px] text-ink">Open the full app</span>
-          <ChevronRight size={17} className="text-subtle" />
-        </button>
+        {/* In the installed app "/" is this shell, and everything is under More. */}
+        {!isNative && (
+          <button type="button" onClick={() => go('/')}
+            className="flex w-full min-h-[52px] items-center gap-3 px-3.5 py-3 text-left active:bg-sunken">
+            <Globe size={18} className="text-subtle" />
+            <span className="flex-1 text-[15px] text-ink">Open the full app</span>
+            <ChevronRight size={17} className="text-subtle" />
+          </button>
+        )}
       </div>
 
       {subscription?.plan_name && (
@@ -210,50 +149,10 @@ function ProfileSheet({ open, onClose }: { open: boolean; onClose: () => void })
   );
 }
 
-/* ---------------------------------------------------------------- more */
-
-function MoreSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { can } = useAuth();
-  const nav = useNavigate();
-
-  const sections = MORE
-    .map((s) => ({ ...s, items: s.items.filter((i) => !i.module || can?.(i.module, 'view')) }))
-    .filter((s) => s.items.length > 0);
-
-  const go = (to: string) => { onClose(); nav(to); };
-
-  return (
-    <Sheet open={open} onClose={onClose} title="More">
-      <p className="text-[12.5px] leading-relaxed text-subtle">
-        The four tabs cover the day-to-day. Everything else from the web app opens here in its full
-        view — use the back button to come back.
-      </p>
-
-      {sections.map((s) => (
-        <div key={s.section} className="space-y-2">
-          <p className="label-cap px-0.5">{s.section}</p>
-          <div className="card divide-y divide-[var(--border)] overflow-hidden">
-            {s.items.map(({ to, label, icon: Icon }) => (
-              <button
-                key={to} type="button" onClick={() => go(to)}
-                className="flex w-full min-h-[52px] items-center gap-3 px-3.5 py-3 text-left active:bg-sunken"
-              >
-                <Icon size={18} className="shrink-0 text-subtle" />
-                <span className="flex-1 truncate text-[15px] text-ink">{label}</span>
-                <ChevronRight size={17} className="shrink-0 text-subtle" />
-              </button>
-            ))}
-          </div>
-        </div>
-      ))}
-    </Sheet>
-  );
-}
-
 /** A stock photo from the pool, or soft initials when there is none. */
 function Drawn({ name }: { name?: string | null }) {
   const src = useStockPhoto(name);
   return src
     ? <img src={src} alt="" className="h-full w-full object-cover" draggable={false} loading="lazy" />
-    : <span className="grid h-full w-full place-items-center text-[13px] font-semibold text-[var(--ink-muted)]">{(name || '?').split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase()}</span>;
+    : <span className="grid h-full w-full place-items-center text-[13px] font-semibold text-[#44403c]">{(name || '?').split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase()}</span>;
 }

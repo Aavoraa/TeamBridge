@@ -17,6 +17,7 @@ import { useAuth } from '../../lib/auth';
 import { relative, time as fmtTime } from '../../lib/format';
 import { useStockPhoto, avatarTint } from '../../lib/avatar';
 import { useToast } from '../../components/ui';
+import VoiceTaskButton from '../../components/VoiceTaskButton';
 import { Empty, ErrorNote, List, Loading, Row, Screen, inputClass } from '../ui';
 
 const CHANNELS_KEY = ['m', 'channels'];
@@ -239,6 +240,7 @@ function Thread({ channelId }: { channelId: string }) {
             <p className="text-[12px] text-subtle">{channel.member_count} members</p>
           )}
         </div>
+        <VoiceTaskButton />
       </header>
 
       <div className="flex-1 space-y-2 px-3 py-3">

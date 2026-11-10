@@ -5,6 +5,7 @@ import { uuid, nowIso, toCsv } from '../lib/util.js';
 import { ok, created, validate, notFound, badRequest, conflict, forbidden, audit } from '../lib/http.js';
 import { requires } from '../middleware/rbac.js';
 import { syncProjectChannel } from '../services/chat.js';
+import { clientIdForName } from '../services/clientAccounts.js';
 import {
   OWNER_ROLES, ownersFor, setProjectOwners, seesAllProjects, associatedSql, canSeeProject,
 } from '../services/projectOversight.js';
@@ -206,6 +207,73 @@ router.get('/workload', requires('projects', 'view'), async (req, res) => {
   }));
 });
 
+/**
+ * A manager's own people: everyone who reports to them (for the workspace
+ * owner, everyone), with the projects each is on, how much of their week is
+ * spoken for, and their open and overdue tasks - plus the projects the caller
+ * runs, which are the ones they can put someone on.
+ */
+router.get('/my-team', requires('projects', 'view'), async (req, res) => {
+  const { tenantId, userId } = req.auth;
+  const everyone = staffsAnyProject(req.auth);
+  const people = await all(
+    `SELECT u.id, u.name, u.email, u.avatar_url, u.designation, u.role, sl.name AS service_line_name
+       FROM users u LEFT JOIN service_lines sl ON sl.id = u.service_line_id
+      WHERE u.tenant_id = ? AND u.deleted_at IS NULL AND u.status != 'disabled' AND u.role != 'client'
+        AND u.id != ? ${everyone ? '' : 'AND u.manager_id = ?'}
+      ORDER BY u.name`,
+    everyone ? [tenantId, userId] : [tenantId, userId, userId],
+  );
+  const ids = people.map((u) => u.id);
+  const marks = ids.map(() => '?').join(',');
+  const seats = ids.length ? await all(
+    `SELECT pm.id AS member_id, pm.user_id, pm.seat, pm.allocation_pct, pm.responsibility,
+            p.id AS project_id, p.name AS project_name, p.status AS project_status, c.name AS client_name,
+            ${seatSql} AS seat_rank
+       FROM project_members pm
+       JOIN projects p ON p.id = pm.project_id AND p.deleted_at IS NULL
+       JOIN clients c ON c.id = p.client_id
+      WHERE pm.tenant_id = ? AND pm.deleted_at IS NULL AND pm.user_id IN (${marks})
+      ORDER BY seat_rank, p.name`,
+    [tenantId, ...ids],
+  ) : [];
+  const now = nowIso();
+  const tasks = ids.length ? await all(
+    `SELECT owner_id, COUNT(*) AS open_tasks,
+            SUM(CASE WHEN due_at IS NOT NULL AND due_at < ? THEN 1 ELSE 0 END) AS overdue_tasks
+       FROM action_items
+      WHERE tenant_id = ? AND deleted_at IS NULL AND status NOT IN ('done', 'cancelled') AND owner_id IN (${marks})
+      GROUP BY owner_id`,
+    [now, tenantId, ...ids],
+  ) : [];
+  const byUser = {};
+  for (const r of seats) (byUser[r.user_id] ||= []).push(r);
+  const taskBy = Object.fromEntries(tasks.map((t) => [t.owner_id, t]));
+
+  const runs = await all(
+    `SELECT p.id, p.name, p.status, c.name AS client_name FROM projects p JOIN clients c ON c.id = p.client_id
+      WHERE p.tenant_id = ? AND p.deleted_at IS NULL AND p.status IN ('planned', 'active', 'on_hold')
+        ${everyone ? '' : `AND ${RUNS_SQL('p')}`}
+      ORDER BY p.name`,
+    everyone ? [tenantId] : [tenantId, ...runsParams(req.auth)],
+  );
+
+  return ok(res, {
+    scope: everyone ? 'everyone' : 'reports',
+    people: people.map((u) => {
+      const projects = byUser[u.id] || [];
+      return {
+        ...u,
+        projects,
+        allocation_pct: projects.reduce((n, p) => n + Number(p.allocation_pct || 0), 0),
+        open_tasks: Number(taskBy[u.id]?.open_tasks || 0),
+        overdue_tasks: Number(taskBy[u.id]?.overdue_tasks || 0),
+      };
+    }),
+    projects_i_run: runs,
+  });
+});
+
 router.get('/:id', requires('projects', 'view'), async (req, res) => {
   const project = await get(`${PROJECT_SELECT} WHERE p.id = ? AND p.tenant_id = ? AND p.deleted_at IS NULL`,
     [req.params.id, req.auth.tenantId]);
@@ -227,12 +295,22 @@ router.get('/:id', requires('projects', 'view'), async (req, res) => {
   });
 });
 
+/** On create the client may be typed by name instead of picked: reused if it exists, added if not. */
+const createProjectSchema = projectSchema.extend({
+  client_id: z.string().optional().nullable(),
+  client_name: z.string().max(160).optional().nullable(),
+});
+
 router.post('/', requires('projects', 'create'), async (req, res) => {
-  const body = validate(projectSchema, req.body);
+  const body = validate(createProjectSchema, req.body);
+  if (!body.client_id && !String(body.client_name || '').trim()) {
+    throw badRequest('Enter the client name', [{ field: 'client_name', message: 'Enter the client name' }]);
+  }
   const id = uuid();
   const at = nowIso();
 
   await tx(async () => {
+    if (!body.client_id) body.client_id = await clientIdForName(req.auth.tenantId, req.auth.userId, body.client_name);
     await run(
       `INSERT INTO projects (id, tenant_id, client_id, name, code, service_line_id, model, status,
          start_date, end_date, budget_minor, manager_id, lead_id, scope_total, scope_delivered, kind, created_at, updated_at)
@@ -353,6 +431,28 @@ async function projectOr404(tenantId, id) {
   return p;
 }
 
+/** SQL: projects this person runs - manager or lead seat, or one of its owners. */
+const RUNS_SQL = (alias = 'p') => `(
+  ${alias}.manager_id = ? OR ${alias}.lead_id = ?
+  OR EXISTS (SELECT 1 FROM project_members pr WHERE pr.project_id = ${alias}.id AND pr.user_id = ?
+               AND pr.deleted_at IS NULL AND pr.seat IN ('manager', 'lead'))
+  OR EXISTS (SELECT 1 FROM project_owners po2 WHERE po2.project_id = ${alias}.id AND po2.user_id = ?))`;
+const runsParams = (auth) => [auth.userId, auth.userId, auth.userId, auth.userId];
+const staffsAnyProject = (auth) => ['owner', 'super_admin'].includes(auth.role);
+
+/**
+ * Who joins a project team, and in what seat, is decided by the people running
+ * it. The workspace owner staffs any project; a manager staffs the ones they
+ * manage, lead or own - not a colleague's.
+ */
+async function staffableOr403(req) {
+  const p = await projectOr404(req.auth.tenantId, req.params.id);
+  if (staffsAnyProject(req.auth)) return p;
+  const runs = await get(`SELECT 1 AS y FROM projects p WHERE p.id = ? AND ${RUNS_SQL('p')}`, [p.id, ...runsParams(req.auth)]);
+  if (!runs) throw forbidden('Only the people running this project, or the workspace owner, can change its team');
+  return p;
+}
+
 /** Keep `projects.manager_id` / `lead_id` pointing at whoever holds that seat. */
 async function syncSeatColumn(tenantId, projectId, seat) {
   const column = SEAT_COLUMN[seat];
@@ -461,7 +561,7 @@ router.get('/:id/available', requires('projects', 'view'), async (req, res) => {
 });
 
 router.post('/:id/members', requires('projects', 'edit'), async (req, res) => {
-  await projectOr404(req.auth.tenantId, req.params.id);
+  await staffableOr403(req);
   const body = validate(memberSchema, req.body);
   const { id, user, existed } = await tx(async () => await addMember(req, req.params.id, body));
 
@@ -478,7 +578,7 @@ router.post('/:id/members', requires('projects', 'edit'), async (req, res) => {
 
 /** Bulk add - staffing a new project one seat at a time is tedious. */
 router.post('/:id/members/bulk', requires('projects', 'edit'), async (req, res) => {
-  await projectOr404(req.auth.tenantId, req.params.id);
+  await staffableOr403(req);
   const body = validate(z.object({ members: z.array(memberSchema).min(1).max(50) }), req.body);
   await tx(async () => { for (const m of body.members) await addMember(req, req.params.id, m); });
 
@@ -489,7 +589,7 @@ router.post('/:id/members/bulk', requires('projects', 'edit'), async (req, res) 
 });
 
 router.patch('/:id/members/:memberId', requires('projects', 'edit'), async (req, res) => {
-  await projectOr404(req.auth.tenantId, req.params.id);
+  await staffableOr403(req);
   const before = await get(
     'SELECT * FROM project_members WHERE id = ? AND project_id = ? AND tenant_id = ? AND deleted_at IS NULL',
     [req.params.memberId, req.params.id, req.auth.tenantId],
@@ -515,7 +615,7 @@ router.patch('/:id/members/:memberId', requires('projects', 'edit'), async (req,
 });
 
 router.delete('/:id/members/:memberId', requires('projects', 'edit'), async (req, res) => {
-  await projectOr404(req.auth.tenantId, req.params.id);
+  await staffableOr403(req);
   const before = await get(
     'SELECT * FROM project_members WHERE id = ? AND project_id = ? AND tenant_id = ? AND deleted_at IS NULL',
     [req.params.memberId, req.params.id, req.auth.tenantId],

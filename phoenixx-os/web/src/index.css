@@ -152,6 +152,41 @@ body {
   body { font-size: 16px; }
 }
 
+/*
+ * A grid with no column set: exactly one column, as wide as the container. Left
+ * to itself that column grows to fit its widest content, which pushes the whole
+ * page sideways on a phone. In the base layer so any grid-cols-* still wins.
+ */
+@layer base {
+  .grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/*
+ * Tables on a phone: each row is a small card. The first cell is its heading,
+ * the rest are "Column name ... value" lines (labels copied in by <Table>).
+ */
+@media (max-width: 639.98px) {
+  table.rt, table.rt tbody { display: block; width: 100%; }
+  table.rt thead { display: none; }
+  table.rt tr { display: block; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  table.rt tbody tr:last-child { border-bottom: 0; }
+  table.rt td {
+    display: block; overflow: hidden; width: auto; padding: 3px 0; border: 0;
+    text-align: right; overflow-wrap: anywhere; font-size: 13.5px;
+  }
+  table.rt td:empty { display: none; }
+  table.rt td[data-label]::before {
+    content: attr(data-label); float: left; max-width: 50%; margin-right: 12px;
+    text-align: left; font-size: 12.5px; color: var(--ink-subtle);
+  }
+  table.rt td > .flex, table.rt td > div > .flex { justify-content: flex-end; }
+  table.rt td[data-label] > .block { margin-left: auto; } /* width-capped values stay on the right */
+  /* The heading cell, and full-width cells (empty states, group rows). */
+  table.rt td:first-child, table.rt td[colspan] { text-align: left; padding-bottom: 6px; }
+  table.rt td:first-child::before { content: none; }
+  table.rt td:first-child > .flex, table.rt td:first-child > div > .flex { justify-content: flex-start; }
+}
+
 /* Numbers in tables and money fields line up column to column. */
 .tabular { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum'; }
 .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
@@ -385,6 +420,19 @@ html.native body {
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);
 }
+
+/* Fixed elements ignore the body's padding, so the side drawer needs its own. */
+html.native aside.fixed {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* A full-height room inside that padding: subtract it, or the controls at the
+   bottom run off the screen. Dark behind the status bar to match the room. */
+html.native .phx-room.h-\[100dvh\] {
+  height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+}
+html.native body:has(.phx-room) { background: #0e1014; }
 
 /* A WebView is not a browser: long-press selecting UI chrome, the grey tap
    flash and iOS rubber-band scrolling all read as bugs in an app. Inputs and

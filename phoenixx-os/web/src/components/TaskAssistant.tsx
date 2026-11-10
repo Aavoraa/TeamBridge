@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   AlertCircle, ArrowRight, CheckCircle2, Keyboard, Mic, Pencil, RotateCcw, Sparkles, Square, Users2,
 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { parseVoiceTask, useSpeech } from '../lib/voiceTask';
-import { clockTime, date as fmtDate } from '../lib/format';
+import { clockTime, date as fmtDate, workspaceToday } from '../lib/format';
+import { isNative } from '../lib/storage';
 import { dueError } from '../pages/ActionItems';
 import { Avatar, Button, Field, Input, Modal, Select, Textarea, cx } from './ui';
 
@@ -21,6 +22,10 @@ import { Avatar, Button, Field, Input, Modal, Select, Textarea, cx } from './ui'
  * Either way the result is only a draft: the person is chosen from the people
  * this user may assign to, nothing is created until "Confirm & Create Task",
  * and the server checks the role and the assignee again on create.
+ *
+ * Owners and managers assign work to their people. Everyone else is in "personal"
+ * mode: same voice and same draft, but it becomes their own private to-do on My
+ * Day, because an action item is only ever handed to somebody else.
  */
 
 type Person = { id: string; name: string; designation?: string | null; avatar_url?: string | null };
@@ -35,6 +40,15 @@ const EXAMPLES = [
   'Assign a high-priority task to Rahul to prepare the project report by tomorrow.',
   'Ask Divya to follow up with the ABC client on Friday.',
 ];
+
+const PERSONAL_EXAMPLES = [
+  'Remind me to call the client tomorrow at 3 pm.',
+  'I need to send the monthly report by Friday, high priority.',
+  'Follow up on the invoice next Monday.',
+];
+
+/** A to-do has three levels where a task has four. */
+const TODO_PRIORITY: Record<string, string> = { low: 'low', medium: 'normal', high: 'high', urgent: 'high' };
 
 const PRIORITIES = [
   { value: 'low', label: 'Low' },
@@ -63,6 +77,7 @@ export function tidyTitle(raw: string) {
     .replace(/^(?:can you |could you )?(?:create|make|add|assign|give)\b(?: me)?(?: an?| one)?(?: new)?(?: (?:high|low|medium|normal|urgent)[- ]priority)?(?: task| action item)?\b(?: (?:for|to))?\s*(?:to\s+)?/i, '')
     .replace(/^(?:ask|tell|get|have)\s+(?:him|her|them)\s+to\s+/i, '')
     .replace(/^(?:she|he|they)\s+(?:should|needs to|need to|has to|have to|must|will|is to)\s+/i, '')
+    .replace(/^(?:remind me|i need|i have|i want|i should)\s+(?:to|about)\s+/i, '')
     .replace(/^to\s+/i, '')
     .replace(/[.!?,\s]+$/, '')
     .trim();
@@ -84,6 +99,7 @@ export default function TaskAssistant({ open, onClose }: { open: boolean; onClos
   const { user } = useAuth();
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
 
   const [phase, setPhase] = useState<Phase>('compose');
   const [command, setCommand] = useState('');
@@ -107,6 +123,7 @@ export default function TaskAssistant({ open, onClose }: { open: boolean; onClos
   });
   const people = peopleQ.data?.people || [];
   const aiOn = !!peopleQ.data?.ai;
+  const personal = (peopleQ.data as any)?.mode === 'personal';
 
   const speech = useSpeech({ onFinal: (text) => setCommand(text) });
 
@@ -154,7 +171,8 @@ export default function TaskAssistant({ open, onClose }: { open: boolean; onClos
   const interpret = async (text: string) => {
     const said = text.trim();
     if (said.length < 3) { setError('Say or type what needs to be done first.'); return; }
-    if (!people.length) {
+    if (peopleQ.isLoading) { setError('Still getting ready. Try again in a moment.'); return; }
+    if (!people.length && !personal) {
       setError(peopleQ.isError ? 'Could not load your team. Check your connection and try again.'
         : 'There is nobody you can assign tasks to yet. People need to report to you (or you need to be the owner).');
       return;
@@ -178,7 +196,7 @@ export default function TaskAssistant({ open, onClose }: { open: boolean; onClos
         const r = fromRules(said);
         next = r.draft; who = r.heard; matches = r.matches;
         if (aiOn) setNotice('AI interpretation is unavailable right now, so this was read with the built-in parser. Check the details.');
-        if (r.selfNamed) { setPhase('compose'); setError('Tasks are handed to someone else. Name the person this is for.'); return; }
+        if (r.selfNamed && !personal) { setPhase('compose'); setError('Tasks are handed to someone else. Name the person this is for.'); return; }
       }
     } catch (e: any) {
       setPhase('compose');
@@ -188,6 +206,12 @@ export default function TaskAssistant({ open, onClose }: { open: boolean; onClos
     }
 
     if (!next.title) { setPhase('compose'); setError('I could not tell what the task is. Try saying it again in one sentence.'); return; }
+    if (personal) {
+      // A to-do is one line, so anything extra the speaker said stays in it.
+      next.title = (next.description ? `${next.title}: ${next.description}` : next.title).slice(0, 200);
+      next.description = '';
+      who = ''; matches = [];
+    }
     if (matches.length === 1) next.owner_id = matches[0].id;
     setHeard(who);
     setChoices(matches.length > 1 ? matches : []);
@@ -201,15 +225,20 @@ export default function TaskAssistant({ open, onClose }: { open: boolean; onClos
   const owner = people.find((p) => p.id === draft.owner_id);
   const problem = useMemo(() => {
     if (draft.title.trim().length < 2) return 'Add a task title.';
-    if (!draft.owner_id) return choices.length > 1 ? `Choose which ${heard || 'person'} you mean.` : 'Choose who this task is for.';
+    if (!personal && !draft.owner_id) return choices.length > 1 ? `Choose which ${heard || 'person'} you mean.` : 'Choose who this task is for.';
     return dueError(draft.due_date, draft.due_time);
-  }, [draft, choices, heard]);
+  }, [draft, choices, heard, personal]);
 
   const create = async () => {
     if (problem || phase === 'creating') return;
     setPhase('creating'); setError('');
     try {
-      const res = await api.post<any>('/action-items', {
+      const res = personal ? await api.post<any>('/todos', {
+        title: draft.title.trim(),
+        todo_date: draft.due_date || workspaceToday(),
+        due_time: draft.due_date ? (draft.due_time || null) : null,
+        priority: TODO_PRIORITY[draft.priority] || 'normal',
+      }, { idempotencyKey: createKey.current }) : await api.post<any>('/action-items', {
         title: draft.title.trim(),
         description: draft.description.trim() || null,
         owner_id: draft.owner_id,
@@ -220,6 +249,7 @@ export default function TaskAssistant({ open, onClose }: { open: boolean; onClos
       }, { idempotencyKey: createKey.current });
       setCreated(res.data);
       setPhase('done');
+      qc.invalidateQueries({ predicate: (q) => q.queryKey.includes('todos') });
       qc.invalidateQueries({ queryKey: ['action-items'] });
       qc.invalidateQueries({ queryKey: ['dashboard', 'home'] });
       qc.invalidateQueries({ queryKey: ['home-counters'] });
@@ -245,15 +275,19 @@ export default function TaskAssistant({ open, onClose }: { open: boolean; onClos
       )}
       <Button variant="primary" icon={<CheckCircle2 size={15} />} onClick={create}
         loading={phase === 'creating'} disabled={!!problem}>
-        Confirm &amp; Create Task
+        {personal ? 'Add to my to-dos' : <>Confirm &amp; Create Task</>}
       </Button>
     </>
   ) : phase === 'done' ? (
     <>
       <Button icon={<RotateCcw size={14} />} onClick={restart}>Create another</Button>
       <Button variant="primary" icon={<ArrowRight size={15} />}
-        onClick={() => { close(); navigate(`/action-items?open=${created?.id}`); }}>
-        Open task
+        onClick={() => {
+          close();
+          if (personal) navigate(isNative || pathname.startsWith('/m') ? '/m/today' : '/');
+          else navigate(`/action-items?open=${created?.id}`);
+        }}>
+        {personal ? 'View my day' : 'Open task'}
       </Button>
     </>
   ) : (
@@ -268,14 +302,15 @@ export default function TaskAssistant({ open, onClose }: { open: boolean; onClos
 
   return (
     <Modal open={open} onClose={close} size="md" footer={footer}
-      title="AI Task Assistant"
-      subtitle={phase === 'confirm' || phase === 'creating' ? 'Check the details, then create the task'
-        : phase === 'done' ? undefined : 'Tell me what needs to be done…'}>
+      title={personal ? 'Add by voice' : 'AI Task Assistant'}
+      subtitle={phase === 'confirm' || phase === 'creating' ? (personal ? 'Check the details, then add it to your list' : 'Check the details, then create the task')
+        : phase === 'done' ? undefined : (personal ? 'What do you need to do?' : 'Tell me what needs to be done…')}>
       {(phase === 'compose' || phase === 'interpreting') && (
         <Compose
           speech={speech} typing={typing} setTyping={setTyping}
           command={command} setCommand={setCommand}
           busy={phase === 'interpreting'} error={error} aiOn={aiOn}
+          examples={personal ? PERSONAL_EXAMPLES : EXAMPLES}
           onSubmit={() => interpret(command)}
         />
       )}
@@ -304,22 +339,26 @@ export default function TaskAssistant({ open, onClose }: { open: boolean; onClos
               </div>
             </div>
           )}
-          {heard && !choices.length && !draft.owner_id && (
+          {!personal && heard && !choices.length && !draft.owner_id && (
             <Note tone="warning">
               “{heard}” is not someone you can assign tasks to. Choose the person below.
             </Note>
           )}
-          {!heard && !draft.owner_id && <Note tone="warning">No one was named. Choose who this task is for.</Note>}
+          {!personal && !heard && !draft.owner_id && <Note tone="warning">No one was named. Choose who this task is for.</Note>}
 
           {editing ? (
             <div className="space-y-3">
               <Field label="Task title" required>
                 <Input value={draft.title} maxLength={240} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
               </Field>
-              <Field label="Description">
-                <Textarea rows={3} value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
-              </Field>
-              <AssigneeSelect people={people} value={draft.owner_id} onChange={(id) => setDraft({ ...draft, owner_id: id })} />
+              {!personal && (
+                <>
+                  <Field label="Description">
+                    <Textarea rows={3} value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
+                  </Field>
+                  <AssigneeSelect people={people} value={draft.owner_id} onChange={(id) => setDraft({ ...draft, owner_id: id })} />
+                </>
+              )}
               <div className="grid gap-3 sm:grid-cols-3">
                 <Field label="Priority">
                   <Select value={draft.priority} onChange={(e) => setDraft({ ...draft, priority: e.target.value })}>
@@ -337,8 +376,8 @@ export default function TaskAssistant({ open, onClose }: { open: boolean; onClos
           ) : (
             <dl className="rounded-lg border border-line divide-y divide-line">
               <Row label="Task title"><span className="font-medium text-ink">{draft.title}</span></Row>
-              <Row label="Description">{draft.description || <Muted>None given</Muted>}</Row>
-              <Row label="Assigned to">
+              {!personal && <Row label="Description">{draft.description || <Muted>None given</Muted>}</Row>}
+              {!personal && <Row label="Assigned to">
                 {owner ? (
                   <span className="flex items-center gap-2"><Avatar name={owner.name} url={owner.avatar_url} size={22} />{owner.name}</span>
                 ) : (
@@ -346,17 +385,19 @@ export default function TaskAssistant({ open, onClose }: { open: boolean; onClos
                     <AssigneeSelect bare people={people} value={draft.owner_id} onChange={(id) => setDraft({ ...draft, owner_id: id })} />
                   </div>
                 )}
-              </Row>
+              </Row>}
               <Row label="Priority">{PRIORITIES.find((p) => p.value === draft.priority)?.label || 'Normal'}</Row>
               <Row label="Due date">
                 {draft.due_date
                   ? `${fmtDate(draft.due_date)}${draft.due_time ? `, ${clockTime(draft.due_time)}` : ''}`
-                  : <Muted>Not set</Muted>}
+                  : <Muted>{personal ? 'Today' : 'Not set'}</Muted>}
               </Row>
-              <Row label="Assigned by">{user?.name} <span className="text-subtle capitalize">({user?.role?.replace('_', ' ')})</span></Row>
+              {personal
+                ? <Row label="Where"><Muted>Your private list on My Day. Only you can see it.</Muted></Row>
+                : <Row label="Assigned by">{user?.name} <span className="text-subtle capitalize">({user?.role?.replace('_', ' ')})</span></Row>}
             </dl>
           )}
-          {problem && draft.owner_id && <p className="text-[12.5px] text-[var(--negative)]">{problem}</p>}
+          {problem && (personal || draft.owner_id) && <p className="text-[12.5px] text-[var(--negative)]">{problem}</p>}
         </div>
       )}
 
@@ -365,9 +406,11 @@ export default function TaskAssistant({ open, onClose }: { open: boolean; onClos
           <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-positive-soft text-[var(--positive)]">
             <CheckCircle2 size={26} />
           </div>
-          <p className="mt-3 text-[15px] font-semibold text-ink">Task created</p>
+          <p className="mt-3 text-[15px] font-semibold text-ink">{personal ? 'Added to your to-dos' : 'Task created'}</p>
           <p className="mt-1 text-[13.5px] text-muted">
-            “{created.title}” is assigned to {created.owner_name || owner?.name}. They have been notified.
+            {personal
+              ? <>“{created.title}” is on your list for {fmtDate(created.todo_date)}{created.due_time ? `, ${clockTime(created.due_time)}` : ''}.</>
+              : <>“{created.title}” is assigned to {created.owner_name || owner?.name}. They have been notified.</>}
           </p>
         </div>
       )}
@@ -376,10 +419,10 @@ export default function TaskAssistant({ open, onClose }: { open: boolean; onClos
 }
 
 // ---------------------------------------------------------------- pieces
-function Compose({ speech, typing, setTyping, command, setCommand, busy, error, aiOn, onSubmit }: {
+function Compose({ speech, typing, setTyping, command, setCommand, busy, error, aiOn, examples, onSubmit }: {
   speech: ReturnType<typeof useSpeech>; typing: boolean; setTyping: (v: boolean) => void;
   command: string; setCommand: (v: string) => void; busy: boolean; error: string; aiOn: boolean;
-  onSubmit: () => void;
+  examples: string[]; onSubmit: () => void;
 }) {
   const live = speech.listening ? speech.interim : command;
   return (
@@ -446,7 +489,7 @@ function Compose({ speech, typing, setTyping, command, setCommand, busy, error, 
         <div>
           <p className="label-cap mb-1.5">Try saying</p>
           <ul className="space-y-1">
-            {EXAMPLES.map((x) => (
+            {examples.map((x) => (
               <li key={x}>
                 <button type="button" onClick={() => { setTyping(true); setCommand(x); }}
                   className="w-full text-left text-[13px] text-muted hover:text-ink rounded px-2 py-1 -mx-2 hover:bg-sunken cursor-pointer">

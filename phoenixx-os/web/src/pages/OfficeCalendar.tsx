@@ -57,7 +57,7 @@ const CHIP: Record<string, string> = {
 /** Solid colours for the phone view's dots (the soft chip backgrounds are too faint at that size). */
 const DOT: Record<string, string> = {
   brand: 'var(--brand)', negative: 'var(--negative)', info: 'var(--info)', accent: 'var(--accent)',
-  warning: 'var(--warning)', positive: 'var(--positive)', neutral: 'var(--text-subtle, #9aa3af)',
+  warning: 'var(--warning)', positive: 'var(--positive)', neutral: 'var(--ink-subtle)',
 };
 
 type Item = {

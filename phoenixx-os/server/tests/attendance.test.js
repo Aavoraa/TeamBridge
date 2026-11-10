@@ -349,15 +349,17 @@ describe('days nobody is expected in', () => {
   });
 
   test('a holiday can be renamed and removed', async () => {
+    // Any day but a Sunday (the weekly off), or "back to a working day" could never hold.
+    const offset = [30, 31].find((n) => new Date(`${shiftDay(n)}T12:00:00Z`).getUTCDay() !== 0);
     const created = (await api.post('/hr/holidays',
-      { holiday_date: shiftDay(30), name: 'Gandhi Jayanthi' }, { token: hr.token })).body.data;
+      { holiday_date: shiftDay(offset), name: 'Gandhi Jayanthi' }, { token: hr.token })).body.data;
 
     const renamed = await api.patch(`/hr/holidays/${created.id}`, { name: 'Gandhi Jayanti' },
       { token: hr.token });
     assert.equal(renamed.body.data.name, 'Gandhi Jayanti');
 
     assert.equal((await api.del(`/hr/holidays/${created.id}`, { token: hr.token })).status, 200);
-    const day = await dayFor(chandru.id, shiftDay(30));
+    const day = await dayFor(chandru.id, shiftDay(offset));
     assert.equal(day.body.data.day_kind, 'working', 'and the day goes back to being a working one');
   });
 });

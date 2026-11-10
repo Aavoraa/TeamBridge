@@ -9,22 +9,27 @@ import {
 
 /**
  * AI Task Assistant (see services/taskAssistant.js). Two read-only endpoints:
- * who may be assigned, and what a command means. Creating the task is the
- * ordinary POST /action-items, re-checked there.
+ * who may be assigned, and what a command means.
+ *
+ * Everyone on the team may use it. Owners and managers hand out work (`assign`):
+ * the result is an ordinary POST /action-items, re-checked there. Everyone else
+ * (`personal`) has nobody to assign to, so what they say becomes their own to-do
+ * through POST /todos; they gain no way to give anyone else work.
  */
 const router = Router();
 
 router.use((req, res, next) => {
-  if (!canUseAssistant(req.auth)) throw forbidden('The task assistant is available to owners and managers');
+  if (req.auth.role === 'client') throw forbidden('The task assistant is for the team');
   next();
 });
 
 const person = (p) => ({ id: p.id, name: p.name, designation: p.designation, avatar_url: p.avatar_url });
 
-/** The people this caller may hand a task to, plus whether AI interpretation is switched on. */
+/** The people this caller may hand a task to, whether AI interpretation is on, and which mode they are in. */
 router.get('/task/people', async (req, res) => ok(res, {
   people: (await eligibleAssignees(req.auth)).map(person),
   ai: aiConfigured(),
+  mode: canUseAssistant(req.auth) ? 'assign' : 'personal',
 }));
 
 router.post('/task/interpret', async (req, res) => {

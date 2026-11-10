@@ -16,6 +16,7 @@ import { notifyMany } from '../services/notifications.js';
 import { idempotency } from '../middleware/common.js';
 import { ASSISTANT_SOURCE, canUseAssistant, eligibleAssignees } from '../services/taskAssistant.js';
 import { emitWebhook } from '../services/webhooks.js';
+import { assertCanAssign } from '../services/taskAssignment.js';
 
 const router = Router();
 
@@ -54,7 +55,7 @@ const itemSchema = z.object({
   // 'advance_planner' is written only by the plan conversion: a forged link
   // would claim a planner task and stop the real conversion of it.
   // 'meeting_ai' likewise only by an approved meeting task (meetingIntel.js).
-  source_type: z.string().refine((s) => !['advance_planner', 'meeting_ai'].includes(s), 'That source is set by the system only')
+  source_type: z.string().refine((s) => !['advance_planner', 'meeting_ai', 'task_request'].includes(s), 'That source is set by the system only')
     .optional().nullable(),
   source_id: z.string().optional().nullable(),
   sop_id: z.string().optional().nullable(),
@@ -973,6 +974,9 @@ export const validateTaskBody = (input) => validate(itemSchema, input);
 
 router.post('/', requires('action_items', 'create'), idempotency, async (req, res) => {
   const body = validate(itemSchema, req.body);
+  // Only owners and managers hand work to other people (services/taskAssignment).
+  await assertCanAssign(req.auth, [body.owner_id, ...(body.assignee_ids || []),
+    ...(body.assign_from_project_id ? await projectTeamIds(req.auth.tenantId, body.assign_from_project_id) : [])]);
   const row = await createActionItem(req, body);
   return created(res, await withValidation(req, row));
 });
@@ -1031,6 +1035,13 @@ router.patch('/:id', requires('action_items', 'edit'), async (req, res) => {
   const nextOwner = body.owner_id !== undefined ? body.owner_id : before.owner_id;
   const fromTeam = body.assign_from_project_id
     ? await projectTeamIds(tenantId, body.assign_from_project_id) : [];
+  // Handing it to someone new is assigning, with the same rule as creating.
+  const newPeople = [
+    ...(body.owner_id && body.owner_id !== before.owner_id ? [body.owner_id] : []),
+    ...(body.assignee_ids || []).filter((id) => !wasAssigned.includes(id)),
+    ...fromTeam.filter((id) => !wasAssigned.includes(id)),
+  ];
+  await assertCanAssign(req.auth, newPeople);
 
   const round = (before.rework_count || 0) + 1;
   const after = await tx(async () => {
@@ -1253,6 +1264,8 @@ router.post('/bulk', requires('action_items', 'edit'), async (req, res) => {
     z.object({ ids: z.array(z.string()).min(1).max(200), patch: itemSchema.partial() }), req.body,
   );
   const { tenantId } = req.auth;
+  // Bulk reassigning is assigning too.
+  await assertCanAssign(req.auth, [patch.owner_id, ...(patch.assignee_ids || [])]);
   const r = repo('action_items', tenantId);
   const updated = [];
   const submitted = [];

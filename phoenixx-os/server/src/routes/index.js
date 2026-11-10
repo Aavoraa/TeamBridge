@@ -8,6 +8,7 @@ import { rateLimit } from '../middleware/common.js';
 
 import { authRouter } from './auth.routes.js';
 import { actionItemsRouter } from './actionItems.routes.js';
+import { taskRequestsRouter } from './taskRequests.routes.js';
 import { meetingsRouter } from './meetings.routes.js';
 import { notificationsRouter } from './notifications.routes.js';
 import { chatRouter } from './chat.routes.js';
@@ -114,6 +115,8 @@ api.use(authenticate);
 api.use(rateLimit());
 
 api.use('/action-items', actionItemsRouter);
+// Employees ask to take a task on themselves; their manager or project lead approves it.
+api.use('/task-requests', taskRequestsRouter);
 // My Day's personal list. No RBAC module: every row is pinned to the caller.
 api.use('/todos', todosRouter);
 api.use('/todo-plan', todoPlanRouter);

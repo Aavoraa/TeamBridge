@@ -34,7 +34,8 @@ export async function applyStatusBarTheme(dark: boolean): Promise<void> {
     await StatusBar.setStyle({ style: dark ? Style.Dark : Style.Light });
     if (Capacitor.getPlatform() === 'android') {
       // iOS refuses a background colour when the view extends under the bar.
-      await StatusBar.setBackgroundColor({ color: dark ? '#0f172a' : '#1e40af' });
+      // Matches the app's page colours (--surface in index.css).
+      await StatusBar.setBackgroundColor({ color: dark ? '#0e1014' : '#f7f8fa' });
     }
   } catch { /* the bar is cosmetic — never let it break startup */ }
 }

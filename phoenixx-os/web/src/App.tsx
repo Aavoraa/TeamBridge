@@ -103,6 +103,8 @@ export default function App() {
       <Route element={<RequireAuth><Layout /></RequireAuth>}>
         {/* Inside the installed app the mobile shell is the whole product. */}
         <Route index element={isNative ? <Navigate to="/m" replace /> : <Home />} />
+        {/* The dashboard itself, for the installed app, where "/" is the phone home screen. */}
+        <Route path="overview" element={<Home />} />
         <Route path="dashboard" element={<Suspense fallback={<FullPageSpinner />}><Dashboard /></Suspense>} />
         <Route path="action-items" element={<Suspense fallback={<FullPageSpinner />}><ActionItems /></Suspense>} />
         <Route path="action-items/:id" element={<Suspense fallback={<FullPageSpinner />}><ActionItems /></Suspense>} />
