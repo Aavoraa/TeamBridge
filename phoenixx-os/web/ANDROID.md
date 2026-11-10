@@ -63,3 +63,29 @@ Source images are in `assets/`. To regenerate:
 ```
 npx @capacitor/assets generate --android --iconBackgroundColor "#ffffff" --splashBackgroundColor "#ffffff" --splashBackgroundColorDark "#0e1014"
 ```
+
+## Phone notifications (Firebase)
+
+The app gets the same notifications as browser pop-ups (new tasks, approvals,
+meetings, chat), even when it is closed. It needs a free Firebase project, set
+up once:
+
+1. At https://console.firebase.google.com create a project (Google Analytics can
+   be off).
+2. Add an **Android app** with package name `com.aavoraa.teambridge`. Download
+   `google-services.json` and put it at `web/android/app/google-services.json`.
+   It is kept out of git. Skip the SDK steps Firebase shows: the project already
+   has them.
+3. **Project settings > Service accounts > Generate new private key.** Keep that
+   file private. Load it into the live server, then delete it:
+
+   ```powershell
+   .\infra\aws\set-fcm-key.ps1 -KeyFile "$HOME\Downloads\<the-key-file>.json"
+   ```
+
+4. Rebuild the app (`npm run build:android`, then `gradlew assembleDebug`). The
+   build switches notifications on only when `google-services.json` is present;
+   without it the app runs normally, just without phone notifications.
+
+After sign-in the app asks once for permission to show notifications. Tapping
+one opens the page it is about. Signing out stops that phone receiving them.

@@ -3,6 +3,7 @@ import { api, tokens, ApiError } from './api';
 import { API_BASE } from './config';
 import { configureLocale } from './format';
 import { syncPush, forgetPushForThisBrowser } from './push';
+import { syncPhonePush, forgetPhonePush } from './phonePush';
 
 export type Role = 'super_admin' | 'owner' | 'manager' | 'employee' | 'finance' | 'hr' | 'client';
 
@@ -58,6 +59,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSession(data);
     // A browser that already allows pop-ups now delivers them to this person.
     syncPush();
+    // In the Android app: this phone now gets the person's notifications.
+    void syncPhonePush();
     if (data.tenant) {
       configureLocale(data.tenant);
       // The app keeps one look (TeamBridge green) for every workspace. A workspace's
@@ -131,6 +134,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     signOut() {
       forgetPushForThisBrowser(tokens.access);
+      void forgetPhonePush(tokens.access);
       const refreshToken = tokens.refresh;
       tokens.clear();
       setSession(null);

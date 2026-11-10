@@ -12,7 +12,7 @@ import {
 } from '../lib/securityQuestions.js';
 
 /**
- * Invite -> sign up -> owner approves.
+ * Invite -> sign up -> owner or HR approves.
  *
  * The owner invites specific people by email. Each gets a personal, one-use
  * link (join_invites). Opening it, the person creates their own account - name,
@@ -21,6 +21,8 @@ import {
  * changing the role or adding a manager), and only then does a real user exist.
  */
 const JOIN_ROLES = ['manager', 'employee', 'finance', 'hr'];
+/** Who invites people and approves their sign-ups. */
+const ONBOARDERS = ['owner', 'hr'];
 const ROLE_LABEL = { manager: 'Manager', employee: 'Employee', finance: 'Finance', hr: 'HR' };
 
 const joinUrl = (t) => `${config.webBaseUrl}/join/${t}`;
@@ -94,7 +96,7 @@ publicJoinRouter.post('/:token', async (req, res) => {
 
   await notifyRole({
     tenantId: inv.tenant_id,
-    roles: ['owner'],
+    roles: ONBOARDERS,
     eventKey: 'team.join_request',
     channels: ['in_app', 'email'],
     link: '/team?tab=requests',
@@ -107,12 +109,15 @@ publicJoinRouter.post('/:token', async (req, res) => {
   return created(res, { status: 'pending', workspace: inv.workspace, email });
 });
 
-// ============================================================ owner (signed in)
+// ================================================== owner and HR (signed in)
 export const joinAdminRouter = Router();
 
-/** Only the workspace owner (founder) invites people and decides requests. */
-function ownerOnly(req) {
-  if (req.auth.role !== 'owner') throw forbidden('Only the workspace owner can invite people and approve them');
+/**
+ * The workspace owner (founder) and HR invite people and decide requests. A
+ * paid add-on seat beyond the plan stays the owner's call (see approve).
+ */
+function onboardersOnly(req) {
+  if (!ONBOARDERS.includes(req.auth.role)) throw forbidden('Only the workspace owner or HR can invite people and approve them');
 }
 
 async function sendInviteEmail(req, invite) {
@@ -141,7 +146,7 @@ const inviteSchema = z.object({
  * sends it again with a fresh link.
  */
 joinAdminRouter.post('/invites', async (req, res) => {
-  ownerOnly(req);
+  onboardersOnly(req);
   const { people } = validate(inviteSchema, req.body);
   const { tenantId } = req.auth;
   const results = [];
@@ -198,7 +203,7 @@ joinAdminRouter.post('/invites', async (req, res) => {
 
 /** Invitations not used yet - the people who have not created their account. */
 joinAdminRouter.get('/invites', async (req, res) => {
-  ownerOnly(req);
+  onboardersOnly(req);
   return ok(res, await all(
     `SELECT i.id, i.email, i.name, i.token, i.created_at, i.updated_at, u.name AS invited_by_name
        FROM join_invites i LEFT JOIN users u ON u.id = i.invited_by
@@ -217,7 +222,7 @@ async function liveInvite(req) {
 
 /** Send again with a fresh link (the old one stops working). */
 joinAdminRouter.post('/invites/:id/resend', async (req, res) => {
-  ownerOnly(req);
+  onboardersOnly(req);
   const inv = await liveInvite(req);
   const t = token(24);
   await run('UPDATE join_invites SET token = ?, updated_at = ? WHERE id = ?', [t, nowIso(), inv.id]);
@@ -226,7 +231,7 @@ joinAdminRouter.post('/invites/:id/resend', async (req, res) => {
 });
 
 joinAdminRouter.post('/invites/:id/revoke', async (req, res) => {
-  ownerOnly(req);
+  onboardersOnly(req);
   const inv = await liveInvite(req);
   await run("UPDATE join_invites SET status = 'revoked', updated_at = ? WHERE id = ?", [nowIso(), inv.id]);
   await audit(req, { entity: 'join_invite', entityId: inv.id, action: 'delete', after: { email: inv.email } });
@@ -235,7 +240,7 @@ joinAdminRouter.post('/invites/:id/revoke', async (req, res) => {
 
 // ---------------------------------------------------------------- requests
 joinAdminRouter.get('/requests', async (req, res) => {
-  ownerOnly(req);
+  onboardersOnly(req);
   const status = ['pending', 'approved', 'rejected'].includes(req.query.status) ? req.query.status : 'pending';
   const rows = await all(
     `SELECT r.id, r.name, r.email, r.phone, r.requested_role, r.designation, r.department, r.status,
@@ -266,7 +271,7 @@ const approveSchema = z.object({
 });
 
 joinAdminRouter.post('/requests/:id/approve', async (req, res) => {
-  ownerOnly(req);
+  onboardersOnly(req);
   const r = await pendingRequest(req);
   const body = validate(approveSchema, req.body || {});
   const { tenantId } = req.auth;
@@ -284,6 +289,9 @@ joinAdminRouter.post('/requests/:id/approve', async (req, res) => {
     [tenantId],
   ))?.n || 0);
   const bandMax = req.subscription?.band_max_users;
+  if (bandMax && seatCount >= bandMax && req.query.allow_addon === 'true' && req.auth.role !== 'owner') {
+    throw forbidden(`The plan's ${bandMax} users are all taken. Adding a paid seat is the workspace owner's decision - ask them to approve this one.`);
+  }
   if (bandMax && seatCount >= bandMax && req.query.allow_addon !== 'true') {
     throw badRequest(
       `The ${req.subscription.plan_name} plan covers up to ${bandMax} users and you have ${seatCount}. Upgrade, or re-send with ?allow_addon=true to add a per-user add-on seat.`,
@@ -326,7 +334,7 @@ joinAdminRouter.post('/requests/:id/approve', async (req, res) => {
 });
 
 joinAdminRouter.post('/requests/:id/reject', async (req, res) => {
-  ownerOnly(req);
+  onboardersOnly(req);
   const r = await pendingRequest(req);
   const body = validate(z.object({ note: z.string().trim().max(300).optional().nullable() }), req.body || {});
   const ts = nowIso();

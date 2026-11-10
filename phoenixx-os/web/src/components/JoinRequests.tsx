@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, Copy, Download, Mail, MailWarning, RefreshCw, Send, UserPlus, X } from 'lucide-react';
 import { api } from '../lib/api';
+import { useAuth } from '../lib/auth';
 import { relative } from '../lib/format';
 import {
   AvatarWithName, Badge, Button, Card, CardHeader, ConfirmDialog, EmptyState, Field, Input, Modal, Select, Table,
@@ -124,6 +125,9 @@ function PendingRow({ r }: { r: any }) {
     onError: (e: any) => toast.error(e.message),
   });
   const overBand = approve.error && (approve.error as any).message?.includes('covers up to');
+  // A paid seat beyond the plan is the owner's decision; HR sees why it stopped.
+  const { user } = useAuth();
+  const ownerDecides = !!overBand && user?.role !== 'owner';
 
   return (
     <div className="flex flex-wrap items-end gap-x-4 gap-y-3 px-5 py-4">
@@ -151,10 +155,14 @@ function PendingRow({ r }: { r: any }) {
           </Select>
         </label>
         <Button icon={<X size={14} />} onClick={() => setRejectOpen(true)}>Reject</Button>
-        <Button variant={overBand ? 'accent' : 'primary'} icon={<Check size={14} />} loading={approve.isPending}
-          onClick={() => approve.mutate(!!overBand)}>
-          {overBand ? 'Approve as extra seat' : 'Approve'}
-        </Button>
+        {ownerDecides ? (
+          <span className="max-w-[220px] text-[12.5px] text-[var(--warning)]">The plan is full. The owner needs to approve this one as an extra seat.</span>
+        ) : (
+          <Button variant={overBand ? 'accent' : 'primary'} icon={<Check size={14} />} loading={approve.isPending}
+            onClick={() => approve.mutate(!!overBand)}>
+            {overBand ? 'Approve as extra seat' : 'Approve'}
+          </Button>
+        )}
       </div>
       <ConfirmDialog open={rejectOpen} onClose={() => setRejectOpen(false)} onConfirm={() => reject.mutate()}
         title={`Reject ${r.name}?`} danger confirmLabel="Reject request" loading={reject.isPending}

@@ -10,6 +10,7 @@ import AcceptInvite from './pages/AcceptInvite';
 import JoinWorkspace from './pages/JoinWorkspace';
 import Recover from './pages/Recover';
 import PublicProposal from './pages/PublicProposal';
+import { usePhonePushLinks } from './lib/phonePush';
 import Home from './pages/Home';
 
 // Route-level code splitting keeps the first paint small on 4G (NFR performance).
@@ -73,6 +74,7 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   const { user, loading } = useAuth();
+  usePhonePushLinks();
 
   return (
     <Routes>

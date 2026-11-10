@@ -92,7 +92,7 @@ export default function JoinWorkspace() {
           <h1 className="text-[18px] font-semibold text-ink">This invitation link no longer works</h1>
           <p className="mt-1.5 text-[13.5px] text-subtle">
             It has already been used, or a newer invitation replaced it. If you already created your account,
-            sign in once the owner approves it. Otherwise ask the owner to send you a new invitation.
+            sign in once it is approved. Otherwise ask the owner or HR to send you a new invitation.
           </p>
           <Link to="/login" className="mt-4 inline-block text-[13.5px] text-[var(--brand)] hover:underline">Go to sign in</Link>
         </div>
@@ -124,7 +124,7 @@ export default function JoinWorkspace() {
       <h1 className="text-[23px] font-semibold text-ink tracking-[-0.01em]">Join {info.data.workspace}</h1>
       <p className="mt-1 text-[14px] text-subtle">
         {info.data.invited_by ? `${info.data.invited_by} invited you. ` : ''}
-        Create your account and tell us your role. The owner approves it before you can sign in.
+        Create your account and tell us your role. The owner or HR approves it before you can sign in.
       </p>
 
       <form className="mt-7 space-y-4" noValidate onSubmit={(e) => { e.preventDefault(); if (ready) send.mutate(); }}>

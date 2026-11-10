@@ -38,7 +38,6 @@ export default function MobileHome() {
   const toast = useToast();
   const { data, isLoading, error, refetch } = useHomeFeed();
   const [createOpen, setCreateOpen] = useState(false);
-  const [notifOpen, setNotifOpen] = useState(false);
 
   const complete = useMutation({
     mutationFn: (id: string) => api.patch(`/action-items/${id}`, { status: 'done' }),
@@ -86,7 +85,7 @@ export default function MobileHome() {
           <Tile2 icon={<ClipboardList size={17} />} label="In progress" count={Number(c.in_progress || 0)}
             tone="info" onClick={() => nav('/m/today')} />
           <Tile2 icon={<Bell size={17} />} label="Notifications" count={Number(c.unread || 0)}
-            tone="brand" onClick={() => setNotifOpen(true)} />
+            tone="brand" onClick={() => nav('/m/notifications')} />
         </div>
 
         <div className="grid grid-cols-2 gap-3">
@@ -144,48 +143,7 @@ export default function MobileHome() {
       </Screen>
 
       <CreateTaskSheet open={createOpen} onClose={() => setCreateOpen(false)} />
-      <NotificationsSheet
-        open={notifOpen}
-        onClose={() => setNotifOpen(false)}
-        items={data?.recent_notifications || []}
-        unread={Number(c.unread || 0)}
-      />
     </>
-  );
-}
-
-function NotificationsSheet({ open, onClose, items, unread }: {
-  open: boolean; onClose: () => void; items: any[]; unread: number;
-}) {
-  const qc = useQueryClient();
-  const toast = useToast();
-
-  const readAll = useMutation({
-    mutationFn: () => api.post('/notifications/read-all'),
-    onSuccess: () => {
-      toast.success('All caught up.');
-      qc.invalidateQueries({ queryKey: HOME_KEY });
-      onClose();
-    },
-    onError: (e: any) => toast.error(e.message),
-  });
-
-  return (
-    <Sheet
-      open={open} onClose={onClose} title="Notifications"
-      footer={unread > 0 ? (
-        <MButton full loading={readAll.isPending} onClick={() => readAll.mutate()}>
-          Mark all as read
-        </MButton>
-      ) : undefined}
-    >
-      <List empty={<Empty icon={<Bell size={22} />} title="Nothing new" />}>
-        {items.map((n) => (
-          <Row key={n.id} title={n.title} meta={n.body}
-            right={n.read_at ? undefined : <span className="text-brand">●</span>} />
-        ))}
-      </List>
-    </Sheet>
   );
 }
 

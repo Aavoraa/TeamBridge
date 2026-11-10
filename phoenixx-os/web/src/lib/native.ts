@@ -11,6 +11,7 @@ import { SplashScreen } from '@capacitor/splash-screen';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { Keyboard, KeyboardResize } from '@capacitor/keyboard';
 import { store } from './storage';
+import { listenForPhonePush } from './phonePush';
 
 /**
  * Marks the document so CSS can tell an installed app from a browser tab —
@@ -72,6 +73,9 @@ export async function initNative(): Promise<void> {
     if (canGoBack && window.history.length > 1) window.history.back();
     else CapApp.exitApp();
   });
+
+  // Before sign-in, so a notification tap that launched the app still opens its page.
+  void listenForPhonePush();
 
   // The splash is dismissed by us, not on a timer, so the user never sees the
   // blank frame between the native launch screen and React's first paint.

@@ -1,9 +1,9 @@
 /**
  * Mobile V2 shell.
  *
- * Four tabs, Teams-style, chosen for what someone actually opens the app to do:
+ * Five tabs, Teams-style, chosen for what someone actually opens the app to do:
  * see what is on them today, talk to the team, check the day's meetings and
- * follow-ups, and mark themselves in or out. Everything else stays on the web
+ * follow-ups, mark themselves in or out, and catch up on notifications. Everything else stays on the web
  * app — this complements it rather than reproducing it.
  *
  * Reached at /m. It is the whole app inside the Capacitor shell (App.tsx sends
@@ -12,7 +12,7 @@
  */
 import { Suspense, lazy } from 'react';
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
-import { CalendarDays, House, MessagesSquare, UserCheck } from 'lucide-react';
+import { Bell, CalendarDays, House, MessagesSquare, UserCheck } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { cx } from '../components/ui';
@@ -24,6 +24,7 @@ const MHome = lazy(() => import('./screens/Home'));
 const MChat = lazy(() => import('./screens/Chat'));
 const MToday = lazy(() => import('./screens/Today'));
 const MHR = lazy(() => import('./screens/HR'));
+const MNotifications = lazy(() => import('./screens/Notifications'));
 
 /**
  * One request behind Home, Today and the HR check-in state. Shared by tab via
@@ -45,9 +46,20 @@ const TABS = [
   { to: '/m/chat', label: 'Chat', icon: MessagesSquare },
   { to: '/m/today', label: 'Today', icon: CalendarDays },
   { to: '/m/hr', label: 'HR', icon: UserCheck },
+  { to: '/m/notifications', label: 'Notifications', icon: Bell },
 ];
 
-function TabBar({ chatUnread }: { chatUnread: number }) {
+const Count = ({ n, label }: { n: number; label: string }) => (
+  <span
+    className="absolute -right-2 -top-1.5 min-w-[17px] rounded-full bg-[var(--negative)] px-1
+               text-center text-[10px] font-bold leading-[17px] text-white"
+    aria-label={`${n} ${label}`}
+  >
+    {n > 99 ? '99+' : n}
+  </span>
+);
+
+function TabBar({ chatUnread, unread }: { chatUnread: number; unread: number }) {
   return (
     <nav
       className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-raised pb-[env(safe-area-inset-bottom)]"
@@ -67,15 +79,8 @@ function TabBar({ chatUnread }: { chatUnread: number }) {
               <>
                 <span className="relative">
                   <Icon size={21} strokeWidth={isActive ? 2.4 : 1.9} />
-                  {label === 'Chat' && chatUnread > 0 && (
-                    <span
-                      className="absolute -right-2 -top-1.5 min-w-[17px] rounded-full bg-[var(--negative)] px-1
-                                 text-center text-[10px] font-bold leading-[17px] text-white"
-                      aria-label={`${chatUnread} unread`}
-                    >
-                      {chatUnread > 99 ? '99+' : chatUnread}
-                    </span>
-                  )}
+                  {label === 'Chat' && chatUnread > 0 && <Count n={chatUnread} label="unread messages" />}
+                  {to === '/m/notifications' && unread > 0 && <Count n={unread} label="unread notifications" />}
                 </span>
                 {label}
               </>
@@ -90,6 +95,7 @@ function TabBar({ chatUnread }: { chatUnread: number }) {
 export default function MobileApp() {
   const { data } = useHomeFeed();
   const chatUnread = Number(data?.counters?.chat || 0);
+  const unread = Number(data?.counters?.unread || 0);
 
   return (
     <MobileChrome>
@@ -101,10 +107,11 @@ export default function MobileApp() {
           <Route path="chat/:channelId" element={<MChat />} />
           <Route path="today" element={<MToday />} />
           <Route path="hr" element={<MHR />} />
+          <Route path="notifications" element={<MNotifications />} />
           <Route path="*" element={<Navigate to="/m" replace />} />
         </Routes>
       </Suspense>
-      <TabBar chatUnread={chatUnread} />
+      <TabBar chatUnread={chatUnread} unread={unread} />
       <TodoReminders />
     </div>
     </MobileChrome>

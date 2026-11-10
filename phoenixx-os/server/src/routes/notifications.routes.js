@@ -5,6 +5,7 @@ import { uuid, nowIso, todayIso, parseJson } from '../lib/util.js';
 import { ok, created, validate, notFound, badRequest, audit, paginate, pageMeta } from '../lib/http.js';
 import { requires, can } from '../middleware/rbac.js';
 import { DEFAULT_TEMPLATES, CHANNELS, notify, pushConfigured, pushToUser } from '../services/notifications.js';
+import { fcmConfigured } from '../services/fcm.js';
 import { config } from '../config.js';
 import { runDeadlineLadder, resolveEscalations } from '../services/deadlines.js';
 import { WEBHOOK_EVENTS } from '../services/webhooks.js';
@@ -296,6 +297,8 @@ router.get('/push/config', async (req, res) => ok(res, {
   enabled: pushConfigured(),
   public_key: config.providers.push.publicKey || null,
   subscribed_browsers: Number((await get('SELECT COUNT(*) AS n FROM push_subscriptions WHERE user_id = ?', [req.auth.userId]))?.n || 0),
+  phones_enabled: fcmConfigured(),
+  registered_phones: Number((await get('SELECT COUNT(*) AS n FROM native_push_devices WHERE user_id = ?', [req.auth.userId]))?.n || 0),
 }));
 
 /** This browser wants pop-ups for the signed-in person. Re-sent on every sign-in. */
@@ -322,9 +325,33 @@ router.post('/push/unsubscribe', async (req, res) => {
   return ok(res, { subscribed: false });
 });
 
-/** "Send me a test pop-up". */
+// ------------------------------------------------------------ phone notifications
+/** The app registers its Firebase token after every sign-in and on every launch. */
+router.post('/push/device', async (req, res) => {
+  const body = validate(z.object({
+    token: z.string().min(20).max(4096),
+    platform: z.enum(['android', 'ios']).default('android'),
+  }), req.body);
+  // The token identifies the install: whoever signed in on it last owns it.
+  await run('DELETE FROM native_push_devices WHERE token = ?', [body.token]);
+  await run(
+    `INSERT INTO native_push_devices (id, tenant_id, user_id, token, platform, created_at, last_used_at)
+     VALUES (?,?,?,?,?,?,?)`,
+    [uuid(), req.auth.tenantId, req.auth.userId, body.token, body.platform, nowIso(), null],
+  );
+  return created(res, { registered: true, sending: fcmConfigured() });
+});
+
+/** Signing out of the app: that phone stops getting this person's notifications. */
+router.post('/push/device/remove', async (req, res) => {
+  const token = String(req.body?.token || '');
+  await run('DELETE FROM native_push_devices WHERE token = ? AND user_id = ?', [token, req.auth.userId]);
+  return ok(res, { registered: false });
+});
+
+/** "Send me a test pop-up" - to every browser and phone this person has on. */
 router.post('/push/test', async (req, res) => {
-  if (!pushConfigured()) throw badRequest('Browser pop-ups are not set up on this server yet');
+  if (!pushConfigured() && !fcmConfigured()) throw badRequest('Pop-ups are not set up on this server yet');
   const out = await pushToUser(req.auth.userId, {
     title: 'Pop-ups are on',
     body: 'This is how Phoenixx OS notifications will appear.',

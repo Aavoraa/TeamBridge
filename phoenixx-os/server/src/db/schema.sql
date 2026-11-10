@@ -1930,6 +1930,19 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 );
 CREATE INDEX IF NOT EXISTS ix_push_user ON push_subscriptions(user_id);
 
+-- Phones running the app: one Firebase token per install. The token names the
+-- install, so whoever signed in on it last owns it; signing out removes it.
+CREATE TABLE IF NOT EXISTS native_push_devices (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  token TEXT NOT NULL UNIQUE,
+  platform TEXT NOT NULL DEFAULT 'android',
+  created_at TEXT NOT NULL,
+  last_used_at TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_native_push_user ON native_push_devices(user_id);
+
 -- ---------------------------------------------------------------- CHAT DELIVERY
 -- Live chat events, kept a day or two so every server instance can deliver
 -- them. On a serverless host there is no single process to hold an in-memory

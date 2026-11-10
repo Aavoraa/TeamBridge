@@ -140,7 +140,7 @@ router.post('/login', rateLimit({ max: 20, windowMs: 15 * 60_000 }), async (req,
     );
     if (pending?.password_hash && bcrypt.compareSync(password, pending.password_hash)) {
       throw new ApiError(403, 'pending_approval',
-        `Your request to join ${pending.workspace} is waiting for the owner's approval. You can sign in once it is approved.`);
+        `Your request to join ${pending.workspace} is waiting for approval from the owner or HR. You can sign in once it is approved.`);
     }
   }
   if (!user || !valid) throw unauthorized('Email or password is incorrect');

@@ -28,12 +28,14 @@ export default function Team() {
   const { can, user } = useAuth();
   const [params, setParams] = useSearchParams();
   const isOwner = user?.role === 'owner';
-  const [tab, setTabState] = useState(() => (params.get('tab') === 'requests' && isOwner ? 'requests' : 'list'));
+  // The owner and HR invite people and approve their sign-ups (the API holds the same rule).
+  const onboards = isOwner || user?.role === 'hr';
+  const [tab, setTabState] = useState(() => (params.get('tab') === 'requests' && onboards ? 'requests' : 'list'));
   const setTab = (id: string) => {
     setTabState(id);
     if (params.get('tab')) { params.delete('tab'); setParams(params, { replace: true }); }
   };
-  const pendingJoins = usePendingJoinCount(isOwner);
+  const pendingJoins = usePendingJoinCount(onboards);
   const [search, setSearch] = useState('');
   const [role, setRole] = useState('');
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -67,11 +69,11 @@ export default function Team() {
               </Button>
             )}
             {can('users', 'create') && (
-              <Button variant={isOwner ? 'secondary' : 'primary'} icon={<Plus size={15} />} onClick={() => setInviteOpen(true)}>
+              <Button variant={onboards ? 'secondary' : 'primary'} icon={<Plus size={15} />} onClick={() => setInviteOpen(true)}>
                 Add someone
               </Button>
             )}
-            {isOwner && (
+            {onboards && (
               <Button variant="primary" icon={<Mail size={15} />} onClick={() => setBulkOpen(true)}>
                 Invite people
               </Button>
@@ -83,7 +85,7 @@ export default function Team() {
             { id: 'list', label: 'Directory' },
             { id: 'org', label: 'Reporting structure' },
             ...(can('projects', 'view') ? [{ id: 'projects', label: 'Projects handled' }] : []),
-            ...(isOwner ? [{ id: 'requests', label: 'Invites & approvals', count: pendingJoins.data || undefined }] : []),
+            ...(onboards ? [{ id: 'requests', label: 'Invites & approvals', count: pendingJoins.data || undefined }] : []),
           ]} />
         }
       />
@@ -166,7 +168,7 @@ export default function Team() {
 
       {tab === 'projects' && <ProjectsHandled onSelect={setOpenId} />}
 
-      {tab === 'requests' && isOwner && <JoinRequests onInvite={() => setBulkOpen(true)} />}
+      {tab === 'requests' && onboards && <JoinRequests onInvite={() => setBulkOpen(true)} />}
 
       {inviteOpen && <InviteModal onClose={() => setInviteOpen(false)} />}
       {bulkOpen && <InvitePeopleModal onClose={() => { setBulkOpen(false); setTab('requests'); }} />}

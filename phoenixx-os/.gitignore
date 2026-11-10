@@ -35,3 +35,6 @@ web/android/local.properties
 *.jks
 *.apk
 *.aab
+
+# Firebase app config for phone notifications: kept out of git, added on the build machine.
+web/android/app/google-services.json

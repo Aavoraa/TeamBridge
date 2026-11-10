@@ -3,6 +3,7 @@ import { get, all, run } from '../db/index.js';
 import { uuid, nowIso, parseJson, renderTemplate } from '../lib/util.js';
 import webpush from 'web-push';
 import { sendMail } from './mailer.js';
+import { fcmConfigured, sendToDevice, GoneDevice } from './fcm.js';
 
 /**
  * Module B - multi-channel notifications.
@@ -110,13 +111,27 @@ function sendWithWebPush(sub, payload) {
   );
 }
 
-/** Push one message to every browser the person has pop-ups on in. */
+/**
+ * Push one message to every browser the person has pop-ups on in, and to every
+ * phone they are signed in to the app on.
+ */
 export async function pushToUser(userId, message) {
-  const subs = await all('SELECT * FROM push_subscriptions WHERE user_id = ?', [userId]);
-  if (!subs.length || !pushConfigured()) return { ok: false, skipped: true };
+  const subs = pushConfigured() ? await all('SELECT * FROM push_subscriptions WHERE user_id = ?', [userId]) : [];
+  const phones = fcmConfigured() ? await all('SELECT * FROM native_push_devices WHERE user_id = ?', [userId]) : [];
+  if (!subs.length && !phones.length) return { ok: false, skipped: true };
   const payload = JSON.stringify(message);
   let delivered = 0;
   let error = null;
+  for (const phone of phones) {
+    try {
+      await sendToDevice(phone.token, message);
+      delivered += 1;
+      await run('UPDATE native_push_devices SET last_used_at = ? WHERE id = ?', [nowIso(), phone.id]);
+    } catch (err) {
+      if (err instanceof GoneDevice) await run('DELETE FROM native_push_devices WHERE id = ?', [phone.id]);
+      error = err?.message || String(err);
+    }
+  }
   for (const sub of subs) {
     try {
       await (pushSender || sendWithWebPush)(sub, payload);
