@@ -6,6 +6,7 @@ import { ok, created, validate, notFound, badRequest, conflict, forbidden, audit
 import { requires } from '../middleware/rbac.js';
 import { DUE_DATE_RE, DUE_TIME_RE, formatDue } from '../lib/dueTime.js';
 import { notifyMany } from '../services/notifications.js';
+import { readFile, saveFile } from '../services/storage.js';
 import { createActionItem, validateTaskBody } from './actionItems.routes.js';
 
 /**
@@ -43,7 +44,9 @@ const decisionSchema = z.object({
 
 const SELECT = `
   SELECT r.*, u.name AS requester_name, u.designation AS requester_designation, u.avatar_url AS requester_avatar,
-         p.name AS project_name, d.name AS decided_by_name
+         p.name AS project_name, d.name AS decided_by_name,
+         (SELECT COUNT(*) FROM attachments at WHERE at.entity = 'task_request' AND at.entity_id = r.id
+            AND at.deleted_at IS NULL) AS attachment_count
     FROM task_requests r
     JOIN users u ON u.id = r.requester_id
     LEFT JOIN projects p ON p.id = r.project_id
@@ -101,6 +104,40 @@ async function approversFor(tenantId, requesterId, projectId) {
 
 const mayDecide = (auth, request) => request.requester_id !== auth.userId
   && (auth.role === 'owner' || auth.role === 'super_admin' || parseJson(request.approver_ids, []).includes(auth.userId));
+
+/**
+ * Who may see a request's files: the person who asked, the people it was sent
+ * to, and the workspace owners. Used by the attachment endpoints.
+ */
+export async function canAccessTaskRequest(auth, requestId) {
+  const r = await get('SELECT requester_id, approver_ids, decided_by FROM task_requests WHERE id = ? AND tenant_id = ?',
+    [requestId, auth.tenantId]);
+  if (!r) return false;
+  return r.requester_id === auth.userId || r.decided_by === auth.userId
+    || auth.role === 'owner' || auth.role === 'super_admin'
+    || parseJson(r.approver_ids, []).includes(auth.userId);
+}
+
+/** On approval the request's files go with it onto the new task, as copies. */
+async function copyAttachmentsToTask(tenantId, requestId, actionItemId) {
+  const files = await all(
+    "SELECT * FROM attachments WHERE tenant_id = ? AND entity = 'task_request' AND entity_id = ? AND deleted_at IS NULL",
+    [tenantId, requestId],
+  );
+  for (const f of files) {
+    const stored = await readFile(f.storage_path);
+    if (!stored) continue;
+    const safeName = f.filename.replace(/[^\w.\- ]/g, '_');
+    const rel = `attachments/${tenantId}/${uuid()}-${safeName}`;
+    await saveFile(rel, stored.data, f.mime || stored.mime);
+    await run(
+      `INSERT INTO attachments (id, tenant_id, entity, entity_id, filename, mime, size_bytes,
+         storage_path, kind, uploaded_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      [uuid(), tenantId, 'action_item', actionItemId, f.filename, f.mime, f.size_bytes, rel, f.kind || 'file',
+        f.uploaded_by, f.created_at],
+    );
+  }
+}
 
 const reviewFilter = (auth) => (auth.role === 'owner' || auth.role === 'super_admin'
   ? { sql: 'r.requester_id != ?', params: [auth.userId] }
@@ -226,6 +263,8 @@ taskRequestsRouter.post('/:id/approve', requires('action_items', 'view'), async 
     throw e;
   }
   await run('UPDATE task_requests SET action_item_id = ? WHERE id = ?', [item.id, request.id]);
+  await copyAttachmentsToTask(tenantId, request.id, item.id)
+    .catch((e) => console.error('[task-requests] could not copy attachments', e));
   await audit(req, { entity: 'task_request', entityId: request.id, action: 'approve', after: { action_item_id: item.id } });
 
   const [row] = await hydrate(tenantId, [await get(`${SELECT} WHERE r.id = ?`, [request.id])]);

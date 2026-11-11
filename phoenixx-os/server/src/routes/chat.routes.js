@@ -48,6 +48,9 @@ function assertCanPost(req, channel, membership) {
   return membership;
 }
 
+/** A group room is run by whoever created it, or by an owner / manager / HR. */
+const canManageGroup = (req, membership) => membership.role === 'owner' || canBroadcast(req.auth);
+
 const withLabel = async (channel, viewerId) => ({ ...channel, label: await channelLabel(channel, viewerId) });
 
 // ----------------------------------------------------------------- channels
@@ -111,7 +114,7 @@ router.get('/channels/:id', async (req, res) => {
   const { channel, membership } = await memberOr404(req, req.params.id);
   const members = await all(
     `SELECT cm.user_id, cm.role, cm.joined_at, cm.last_read_at, u.name, u.avatar_url, u.designation,
-            u.role AS org_role, pm.seat AS project_seat
+            u.role AS org_role, pm.seat AS project_seat, pm.id AS project_member_id
        FROM channel_members cm
        JOIN users u ON u.id = cm.user_id
        LEFT JOIN project_members pm ON pm.user_id = cm.user_id AND pm.project_id = ?
@@ -124,6 +127,9 @@ router.get('/channels/:id', async (req, res) => {
   return ok(res, {
     ...await withLabel(channel, req.auth.userId),
     my_role: membership.role,
+    // Group rooms: who may add, remove and delete. Project rooms are managed
+    // through the project team instead (the client checks `projects.edit`).
+    can_manage: channel.kind === 'group' && canManageGroup(req, membership),
     muted: membership.muted === 1,
     last_read_at: membership.last_read_at,
     unread: await unreadCount(channel.id, req.auth.userId, membership.last_read_at),
@@ -176,6 +182,29 @@ router.patch('/channels/:id/settings', async (req, res) => {
   return ok(res, { muted: body.muted });
 });
 
+/**
+ * Delete a group room for everyone. Project rooms go with their project, and
+ * the company channel and direct messages cannot be deleted.
+ */
+router.delete('/channels/:id', async (req, res) => {
+  const { channel, membership } = await memberOr404(req, req.params.id);
+  if (channel.kind !== 'group') {
+    throw badRequest(channel.kind === 'project'
+      ? 'This room belongs to its project — archive the project instead'
+      : 'This conversation cannot be deleted');
+  }
+  if (!canManageGroup(req, membership)) {
+    throw forbidden('Only the group owner, or an owner, manager or HR, can delete it');
+  }
+
+  const at = nowIso();
+  await run('UPDATE channels SET deleted_at = ?, updated_at = ? WHERE id = ?', [at, at, channel.id]);
+  await run('UPDATE channel_members SET deleted_at = ? WHERE channel_id = ? AND deleted_at IS NULL', [at, channel.id]);
+
+  await audit(req, { entity: 'channel', entityId: channel.id, action: 'delete', before: channel });
+  return ok(res, { ok: true });
+});
+
 // ------------------------------------------------------------------ members
 router.post('/channels/:id/members', async (req, res) => {
   const { channel, membership } = await memberOr404(req, req.params.id);
@@ -184,7 +213,7 @@ router.post('/channels/:id/members', async (req, res) => {
       ? 'This room follows the project team — add them to the project instead'
       : 'This conversation manages its own members');
   }
-  if (membership.role !== 'owner') throw forbidden('Only the conversation owner can invite people');
+  if (!canManageGroup(req, membership)) throw forbidden('Only the group owner, or an owner, manager or HR, can add people');
 
   const body = validate(z.object({ user_ids: z.array(z.string()).min(1).max(50) }), req.body);
   const added = [];
@@ -206,7 +235,9 @@ router.delete('/channels/:id/members/:userId', async (req, res) => {
   if (channel.kind === 'project') throw badRequest('Membership here follows the project team');
   if (channel.kind === 'broadcast') throw badRequest('Everyone belongs to the company channel');
   if (channel.kind === 'direct') throw badRequest('A direct conversation cannot be left');
-  if (!leaving && membership.role !== 'owner') throw forbidden('Only the conversation owner can remove people');
+  if (!leaving && !canManageGroup(req, membership)) {
+    throw forbidden('Only the group owner, or an owner, manager or HR, can remove people');
+  }
 
   const person = await get('SELECT name FROM users WHERE id = ?', [req.params.userId]);
   if (await removeMember(channel.id, req.params.userId)) {

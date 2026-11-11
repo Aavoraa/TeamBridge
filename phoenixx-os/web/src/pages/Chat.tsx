@@ -3,13 +3,13 @@ import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   MessageSquare, Plus, Pin, PinOff, Reply, Trash2,
-  PencilLine, Bell, BellOff, X, Info, CornerDownRight, ArrowDown,
+  PencilLine, Bell, BellOff, X, Info, CornerDownRight, ArrowDown, UserPlus, UserMinus, LogOut, Crown,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { dateTime, time, titleCase } from '../lib/format';
 import {
-  Avatar, Button, Card, ConfirmDialog, EmptyState, ErrorState, Field, Input, Modal,
+  Avatar, Badge, Button, Card, ConfirmDialog, EmptyState, ErrorState, Field, Input, Modal,
   SearchInput, Skeleton, Textarea, useToast, cx,
 } from '../components/ui';
 import {
@@ -290,7 +290,8 @@ function Thread({ channelId, me, onBack, showMembers, toggleMembers }: {
 
       <div className="flex min-h-0 flex-1">
         {/* ------------------------------------------------------ messages */}
-        <div ref={scroller} onScroll={onScroll} className="relative flex-1 overflow-y-auto px-3 py-3">
+        <div ref={scroller} onScroll={onScroll}
+          className={cx('relative flex-1 overflow-y-auto px-3 py-3', showMembers && channel.kind !== 'direct' && 'hidden sm:block')}>
           {isLoading ? (
             <div className="space-y-3">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-14" />)}</div>
           ) : !messages.length ? (
@@ -327,7 +328,7 @@ function Thread({ channelId, me, onBack, showMembers, toggleMembers }: {
           )}
         </div>
 
-        {showMembers && channel.kind !== 'direct' && <MembersPanel channel={channel} />}
+        {showMembers && channel.kind !== 'direct' && <MembersPanel channel={channel} me={me} onGone={onBack} />}
       </div>
 
       {/* ------------------------------------------------------ composer */}
@@ -421,31 +422,229 @@ const IconAction = ({ label, onClick, children }: { label: string; onClick: () =
 );
 
 /* ---------------------------------------------------------------- panels */
-function MembersPanel({ channel }: { channel: any }) {
+/**
+ * Members of a room, with the controls to change them.
+ *
+ * Group rooms are managed here directly. A project room mirrors its project's
+ * team, so adding or removing someone here changes the project team itself -
+ * the server then re-syncs the room. Neither the company channel nor a direct
+ * message has members to manage.
+ */
+function MembersPanel({ channel, me, onGone }: { channel: any; me: any; onGone: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const { can } = useAuth();
+  const [adding, setAdding] = useState(false);
+  const [removing, setRemoving] = useState<any>(null);
+  const [force, setForce] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmLeave, setConfirmLeave] = useState(false);
+
+  const isGroup = channel.kind === 'group';
+  const isProject = channel.kind === 'project' && !!channel.project_id;
+  const canManage = isGroup ? !!channel.can_manage : isProject && can('projects', 'edit');
+
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ['chat', 'channel', channel.id] });
+    qc.invalidateQueries({ queryKey: ['chat', 'messages', channel.id] });
+    qc.invalidateQueries({ queryKey: ['chat', 'channels'] });
+    if (isProject) qc.invalidateQueries({ queryKey: ['projects'] });
+  };
+
+  const remove = useMutation({
+    mutationFn: ({ member, forced }: { member: any; forced?: boolean }) => (isProject
+      ? api.del(`/projects/${channel.project_id}/members/${member.project_member_id}`,
+        forced ? { params: { force: 'true' } } : {})
+      : api.del(`/chat/channels/${channel.id}/members/${member.user_id}`)),
+    onSuccess: (_r, { member }) => {
+      setRemoving(null);
+      setForce(null);
+      refresh();
+      toast.success(`${member.name} removed`);
+    },
+    onError: (e: any) => {
+      // The project still has open work assigned to them: ask before forcing it.
+      if (isProject && e.status === 409) { setForce(e.message); return; }
+      setRemoving(null);
+      toast.error(e.message);
+    },
+  });
+
+  const leave = useMutation({
+    mutationFn: () => api.del(`/chat/channels/${channel.id}/members/${me?.id}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['chat', 'channels'] }); onGone(); },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const destroy = useMutation({
+    mutationFn: () => api.del(`/chat/channels/${channel.id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['chat', 'channels'] });
+      toast.success('Group deleted');
+      onGone();
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  // A member row can be removed by a manager, never yourself (that is "Leave"),
+  // and in a project room only when they actually hold a seat on the project.
+  // The room's owner(s) first, so who runs it is the first thing you see.
+  const members = [...channel.members].sort((a: any, b: any) => Number(b.role === 'owner') - Number(a.role === 'owner'));
+  const owners = members.filter((m: any) => m.role === 'owner').map((m: any) => m.name.split(' ')[0]);
+
+  const removable = (m: any) => canManage && m.user_id !== me?.id && (!isProject || !!m.project_member_id);
+
   return (
-    <aside className="hidden w-[230px] shrink-0 overflow-y-auto border-l border-line p-3 lg:block">
-      <p className="label-cap mb-2">
-        {channel.kind === 'project' ? 'Delivery team' : 'Members'} ({channel.members.length})
-      </p>
-      <ul className="space-y-1.5">
-        {channel.members.map((m: any) => (
-          <li key={m.user_id} className="flex items-center gap-2">
+    <aside className="flex w-full shrink-0 flex-col overflow-y-auto border-l border-line p-3 sm:w-[260px]">
+      <div className="mb-2 flex items-center gap-2">
+        <p className="label-cap flex-1">
+          {channel.kind === 'project' ? 'Delivery team' : 'Members'} ({channel.members.length})
+        </p>
+        {canManage && (
+          <Button size="sm" variant="ghost" icon={<UserPlus size={14} />} onClick={() => setAdding(true)}>
+            Add
+          </Button>
+        )}
+      </div>
+
+      <ul className="space-y-1">
+        {members.map((m: any) => (
+          <li key={m.user_id} className="group flex items-center gap-2 rounded-md px-1 py-1 hover:bg-sunken">
             <Avatar name={m.name} url={m.avatar_url} size={26} />
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[12.5px] text-ink">{m.name}</span>
-              <span className="block truncate text-[11px] text-subtle">
-                {m.project_seat ? titleCase(m.project_seat) : m.designation || titleCase(m.org_role)}
+              <span className="block truncate text-[12.5px] text-ink">
+                {m.name}{m.user_id === me?.id && <span className="text-subtle"> (you)</span>}
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="truncate text-[11px] text-subtle">
+                  {m.project_seat ? titleCase(m.project_seat) : m.designation || titleCase(m.org_role)}
+                </span>
+                {m.role === 'owner' && (
+                  <Badge tone="brand" className="!gap-1 !px-1.5 !py-0 !text-[10.5px] !leading-4 shrink-0">
+                    <Crown size={10} /> {isGroup ? 'Group owner' : 'Owner'}
+                  </Badge>
+                )}
               </span>
             </span>
+            {removable(m) && (
+              <button onClick={() => setRemoving(m)} aria-label={`Remove ${m.name}`} title={`Remove ${m.name}`}
+                className="grid h-6 w-6 shrink-0 place-items-center rounded text-subtle hover:bg-raised hover:text-[var(--danger,#dc2626)] cursor-pointer">
+                <UserMinus size={14} />
+              </button>
+            )}
           </li>
         ))}
       </ul>
+
       {channel.kind === 'project' && (
         <p className="mt-3 text-[11.5px] leading-relaxed text-subtle">
-          Membership follows the project team. Add or remove people on the project itself.
+          {canManage
+            ? 'This room follows the project team: adding or removing someone here changes the project team too.'
+            : `Membership follows the project team. Ask ${owners.length ? owners.join(' or ') : 'the project manager'} to add or remove people.`}
         </p>
       )}
+
+      {isGroup && (
+        <div className="mt-auto space-y-2 border-t border-line pt-3">
+          <Button size="sm" className="w-full" icon={<LogOut size={14} />} onClick={() => setConfirmLeave(true)}>
+            Leave group
+          </Button>
+          {channel.can_manage && (
+            <Button size="sm" variant="danger" className="w-full" icon={<Trash2 size={14} />}
+              onClick={() => setConfirmDelete(true)}>
+              Delete group
+            </Button>
+          )}
+        </div>
+      )}
+
+      {adding && (
+        <AddMembersModal channel={channel} isProject={isProject} onClose={() => setAdding(false)}
+          onAdded={(n) => { refresh(); toast.success(`${n} added`); }} />
+      )}
+
+      <ConfirmDialog open={!!removing && !force} onClose={() => setRemoving(null)} danger confirmLabel="Remove"
+        loading={remove.isPending} onConfirm={() => remove.mutate({ member: removing })}
+        title={`Remove ${removing?.name}?`}
+        message={isProject
+          ? `They come off the ${channel.label} project team and lose access to this room.`
+          : 'They lose access to this group and its messages.'} />
+
+      <ConfirmDialog open={!!force} onClose={() => { setForce(null); setRemoving(null); }} danger
+        confirmLabel="Remove anyway" loading={remove.isPending}
+        onConfirm={() => remove.mutate({ member: removing, forced: true })}
+        title="They still have open work" message={force} />
+
+      <ConfirmDialog open={confirmLeave} onClose={() => setConfirmLeave(false)} confirmLabel="Leave"
+        loading={leave.isPending} onConfirm={() => leave.mutate()}
+        title="Leave this group?" message="You stop receiving its messages. Someone will have to add you back." />
+
+      <ConfirmDialog open={confirmDelete} onClose={() => setConfirmDelete(false)} danger confirmLabel="Delete group"
+        loading={destroy.isPending} onConfirm={() => destroy.mutate()}
+        title={`Delete ${channel.label}?`}
+        message="The group and all its messages disappear for everyone. This cannot be undone." />
     </aside>
+  );
+}
+
+function AddMembersModal({ channel, isProject, onClose, onAdded }: {
+  channel: any; isProject: boolean; onClose: () => void; onAdded: (n: number) => void;
+}) {
+  const toast = useToast();
+  const [search, setSearch] = useState('');
+  const [picked, setPicked] = useState<string[]>([]);
+
+  const { data: directory } = useQuery({
+    queryKey: ['users-directory'],
+    queryFn: () => api.get('/users/directory').then((r) => r.data),
+    staleTime: 300_000,
+  });
+
+  const people = useMemo(() => {
+    const inRoom = new Set(channel.members.map((m: any) => m.user_id));
+    const q = search.trim().toLowerCase();
+    return (directory ?? []).filter((u: any) => !inRoom.has(u.id)
+      && (!q || [u.name, u.designation, u.email].some((v: string) => v?.toLowerCase().includes(q))));
+  }, [directory, search, channel.members]);
+
+  const add = useMutation({
+    mutationFn: () => (isProject
+      ? api.post(`/projects/${channel.project_id}/members/bulk`, { members: picked.map((user_id) => ({ user_id })) })
+      : api.post(`/chat/channels/${channel.id}/members`, { user_ids: picked })),
+    onSuccess: () => { onAdded(picked.length); onClose(); },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const toggle = (id: string) => setPicked((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
+  return (
+    <Modal open onClose={onClose} size="md" title={`Add people to ${channel.label}`}
+      subtitle={isProject ? 'They join the project team as members, and this room with it' : undefined}
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" loading={add.isPending} disabled={!picked.length} onClick={() => add.mutate()}>
+            {picked.length ? `Add ${picked.length}` : 'Add'}
+          </Button>
+        </>
+      }>
+      <div className="space-y-3">
+        <SearchInput value={search} onChange={setSearch} placeholder="Search people…" />
+        <div className="max-h-[42vh] divide-y divide-[var(--line)] overflow-y-auto rounded-lg border border-line">
+          {!people.length ? <EmptyState compact title="Nobody left to add" /> : people.map((u: any) => (
+            <label key={u.id} className={cx('flex cursor-pointer items-center gap-3 p-2.5', picked.includes(u.id) && 'bg-sunken')}>
+              <input type="checkbox" checked={picked.includes(u.id)} onChange={() => toggle(u.id)}
+                className="h-4 w-4 accent-[var(--brand)] cursor-pointer" />
+              <Avatar name={u.name} url={u.avatar_url} size={28} />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[13.5px] text-ink">{u.name}</span>
+                <span className="block truncate text-[12px] text-subtle">{u.designation || titleCase(u.role)}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+      </div>
+    </Modal>
   );
 }
 

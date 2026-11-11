@@ -52,7 +52,13 @@ type NavItem = {
   exact?: boolean;
   badge?: BadgeKind;
   superAdmin?: boolean;
+  /** Hidden unless the caller has one of these roles (on top of the module check). */
+  roles?: string[];
 };
+
+/** The CRM section is drawn for these roles only. The API still allows other
+ *  roles their CRM permissions (client pickers in invoices, tasks, meetings). */
+const CRM_ROLES = ['owner', 'manager', 'super_admin'];
 /** A top-level entry: a page of its own, or a section that opens to show its pages. */
 type NavGroup = { label: string; icon: any } & ({ item: NavItem; children?: never } | { item?: never; children: NavItem[] });
 
@@ -75,10 +81,10 @@ const NAV: NavGroup[] = [
     label: 'CRM', icon: SquareUser, children: [
       // The register first, the pipeline second: you look up who a client is far
       // more often than you move a deal between stages.
-      { to: '/clients', label: 'Clients', icon: Contact, module: 'crm' },
-      { to: '/crm', label: 'Pipeline', icon: Users2, module: 'crm' },
-      { to: '/proposals', label: 'Proposals', icon: FileText, module: 'proposals' },
-      { to: '/marketing', label: 'Marketing leads', icon: Megaphone, module: 'crm' },
+      { to: '/clients', label: 'Clients', icon: Contact, module: 'crm', roles: CRM_ROLES },
+      { to: '/crm', label: 'Pipeline', icon: Users2, module: 'crm', roles: CRM_ROLES },
+      { to: '/proposals', label: 'Proposals', icon: FileText, module: 'proposals', roles: CRM_ROLES },
+      { to: '/marketing', label: 'Marketing leads', icon: Megaphone, module: 'crm', roles: CRM_ROLES },
     ],
   },
   {
@@ -227,7 +233,11 @@ export function Sidebar({ open: drawerOpen, onClose, drawerOnly }: {
   const isSuperAdmin = user?.role === 'super_admin';
   // The same permission the API enforces decides whether an entry is drawn.
   // Hiding it is a courtesy; the server refuses the call either way.
-  const visible = (item: NavItem) => (item.superAdmin ? isSuperAdmin : !item.module || can(item.module, item.action || 'view'));
+  const visible = (item: NavItem) => {
+    if (item.superAdmin) return isSuperAdmin;
+    if (item.roles && !item.roles.includes(user?.role || '')) return false;
+    return !item.module || can(item.module, item.action || 'view');
+  };
 
   // Which sections are open: the one holding the current page always is.
   const [open, setOpen] = useState<Record<string, boolean>>(() => { try { return JSON.parse(store.get('tb.nav.open') || '{}'); } catch { return {}; } });
