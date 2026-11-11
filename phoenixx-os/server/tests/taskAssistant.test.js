@@ -260,3 +260,61 @@ describe('creating the confirmed task', () => {
     assert.equal(outside.status, 403, 'Priya Shankar is not on her team');
   });
 });
+
+describe('Tamil commands', () => {
+  const people = [
+    { id: '1', name: 'Priya Raman' }, { id: '3', name: 'Rahul Kumar' }, { id: '4', name: 'Divya Ramesh' },
+    { id: '5', name: 'Sundar Rajan' }, { id: '6', name: 'Karthik S' },
+  ];
+  const ids = (heard) => assistant.matchPerson(heard, people).map((p) => p.id);
+
+  test('names said in Tamil script find the right person', () => {
+    assert.deepEqual(ids('பிரியா'), ['1']);
+    assert.deepEqual(ids('ராகுல்'), ['3']);
+    assert.deepEqual(ids('திவ்யா'), ['4']);
+    assert.deepEqual(ids('சுந்தர்'), ['5']);
+    assert.deepEqual(ids('கார்த்திக்'), ['6']);
+    assert.deepEqual(ids('பிரியாவுக்கு'), ['1'], 'with the Tamil "to" ending');
+  });
+
+  test('Tanglish endings and kinship words are dropped', () => {
+    assert.deepEqual(ids('Priyakku'), ['1']);
+    assert.deepEqual(ids('Sundar kitta'), ['5']);
+    assert.deepEqual(ids('Divya akka'), ['4']);
+    assert.deepEqual(ids('Rahul-kku'), ['3']);
+    assert.deepEqual(ids('Sundhar'), ['5']);
+  });
+
+  test('a Tamil command goes to the AI with English output asked for, and its name is matched', async () => {
+    process.env.ANTHROPIC_API_KEY = 'test-key';
+    let seen;
+    assistant.setAssistantClientForTests({ beta: { messages: { create: async (req) => {
+      seen = req;
+      return { stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({
+        is_task: true, title: 'Send the client confirmation emails', description: '', assignee_name: 'ராகுல்',
+        priority: 'urgent', due_date: '', due_time: '', clarification: '',
+      }) }] };
+    } } } });
+    try {
+      const res = await api.post('/assistant/task/interpret',
+        { text: 'ராகுலுக்கு client confirmation emails அனுப்ப சொல்லு, அவசரம்' }, { token: ownerToken });
+      assert.equal(res.body.data.engine, 'ai');
+      assert.match(seen.system, /Tamil/);
+      assert.match(seen.system, /title and description in clear English/);
+      assert.match(seen.messages[0].content, /ராகுலுக்கு/);
+      assert.deepEqual(res.body.data.person.matches.map((p) => p.name), ['Rahul Kumar']);
+      assert.equal(res.body.data.draft.priority, 'urgent');
+    } finally {
+      delete process.env.ANTHROPIC_API_KEY;
+      assistant.setAssistantClientForTests(undefined);
+    }
+  });
+
+  test('without AI, a Tamil command is flagged rather than guessed at', async () => {
+    const res = await api.post('/assistant/task/interpret', { text: 'ராகுலுக்கு report அனுப்ப சொல்லு' }, { token: ownerToken });
+    assert.equal(res.body.data.engine, 'none');
+    assert.equal(res.body.data.tamil, true);
+    const en = await api.post('/assistant/task/interpret', { text: 'Ask Rahul to send the report' }, { token: ownerToken });
+    assert.equal(en.body.data.tamil, false);
+  });
+});

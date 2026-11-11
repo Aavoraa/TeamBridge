@@ -41,6 +41,24 @@ const EXAMPLES = [
   'Ask Divya to follow up with the ABC client on Friday.',
 ];
 
+const TAMIL_EXAMPLES = [
+  'பிரியாவுக்கு நாளைக்குள் client confirmation emails அனுப்ப சொல்லு',
+  'ராகுலுக்கு வெள்ளிக்கிழமைக்குள் project report தயார் செய்ய ஒரு அவசர task கொடு',
+  'Divya-kku Friday ABC client-a follow up panna sollu',
+];
+
+const PERSONAL_TAMIL_EXAMPLES = [
+  'நாளைக்கு மதியம் 3 மணிக்கு client-க்கு call பண்ண நினைவுபடுத்து',
+  'Friday-kulla monthly report anuppanum, high priority',
+];
+
+/** Which language the microphone listens in. Typed commands work in either. */
+type Lang = 'en-IN' | 'ta-IN';
+const LANG_KEY = 'tb.voice.lang';
+const savedLang = (): Lang => {
+  try { return localStorage.getItem(LANG_KEY) === 'ta-IN' ? 'ta-IN' : 'en-IN'; } catch { return 'en-IN'; }
+};
+
 const PERSONAL_EXAMPLES = [
   'Remind me to call the client tomorrow at 3 pm.',
   'I need to send the monthly report by Friday, high priority.',
@@ -125,7 +143,12 @@ export default function TaskAssistant({ open, onClose }: { open: boolean; onClos
   const aiOn = !!peopleQ.data?.ai;
   const personal = (peopleQ.data as any)?.mode === 'personal';
 
-  const speech = useSpeech({ onFinal: (text) => setCommand(text) });
+  const [lang, setLangState] = useState<Lang>(savedLang);
+  const setLang = (l: Lang) => {
+    speech.stop(); setLangState(l);
+    try { localStorage.setItem(LANG_KEY, l); } catch { /* private window */ }
+  };
+  const speech = useSpeech({ lang, onFinal: (text) => setCommand(text) });
 
   // Opening fresh every time: nothing half-done carries over.
   useEffect(() => {
@@ -195,6 +218,12 @@ export default function TaskAssistant({ open, onClose }: { open: boolean; onClos
       } else {
         const r = fromRules(said);
         next = r.draft; who = r.heard; matches = r.matches;
+        if (out.tamil) {
+          setPhase('compose');
+          setError(aiOn ? 'AI interpretation is unavailable right now, and Tamil needs it. Try again in a moment, or type the task in English.'
+            : 'Tamil commands need AI interpretation, which is not switched on for this workspace. Type the task in English for now.');
+          return;
+        }
         if (aiOn) setNotice('AI interpretation is unavailable right now, so this was read with the built-in parser. Check the details.');
         if (r.selfNamed && !personal) { setPhase('compose'); setError('Tasks are handed to someone else. Name the person this is for.'); return; }
       }
@@ -310,7 +339,8 @@ export default function TaskAssistant({ open, onClose }: { open: boolean; onClos
           speech={speech} typing={typing} setTyping={setTyping}
           command={command} setCommand={setCommand}
           busy={phase === 'interpreting'} error={error} aiOn={aiOn}
-          examples={personal ? PERSONAL_EXAMPLES : EXAMPLES}
+          examples={lang === 'ta-IN' ? (personal ? PERSONAL_TAMIL_EXAMPLES : TAMIL_EXAMPLES) : (personal ? PERSONAL_EXAMPLES : EXAMPLES)}
+          lang={lang} setLang={setLang}
           onSubmit={() => interpret(command)}
         />
       )}
@@ -419,14 +449,26 @@ export default function TaskAssistant({ open, onClose }: { open: boolean; onClos
 }
 
 // ---------------------------------------------------------------- pieces
-function Compose({ speech, typing, setTyping, command, setCommand, busy, error, aiOn, examples, onSubmit }: {
+function Compose({ speech, typing, setTyping, command, setCommand, busy, error, aiOn, examples, onSubmit, lang, setLang }: {
   speech: ReturnType<typeof useSpeech>; typing: boolean; setTyping: (v: boolean) => void;
   command: string; setCommand: (v: string) => void; busy: boolean; error: string; aiOn: boolean;
-  examples: string[]; onSubmit: () => void;
+  examples: string[]; onSubmit: () => void; lang: Lang; setLang: (l: Lang) => void;
 }) {
   const live = speech.listening ? speech.interim : command;
   return (
     <div className="space-y-4">
+      <div className="flex justify-center">
+        <div role="radiogroup" aria-label="Language" className="inline-flex rounded-full border border-line p-0.5 text-[12.5px]">
+          {([['en-IN', 'English'], ['ta-IN', 'தமிழ்']] as const).map(([id, label]) => (
+            <button key={id} type="button" role="radio" aria-checked={lang === id} disabled={busy}
+              onClick={() => setLang(id)}
+              className={cx('rounded-full px-3 py-1 transition-colors cursor-pointer',
+                lang === id ? 'bg-brand-soft text-[var(--brand)] font-medium' : 'text-muted hover:text-ink')}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
       {!typing && (
         <div className="flex flex-col items-center pt-2">
           <button type="button" onClick={speech.listening ? speech.stop : speech.start} disabled={busy}
@@ -456,7 +498,7 @@ function Compose({ speech, typing, setTyping, command, setCommand, busy, error, 
       )}
 
       {typing ? (
-        <Field label="Type your request" hint="One sentence: who, what, and by when if there is a deadline.">
+        <Field label="Type your request" hint="One sentence: who, what, and by when. English, தமிழ் or Tanglish all work.">
           <Textarea rows={3} autoFocus value={command} disabled={busy}
             placeholder="Ask Priya to complete the pending client confirmation emails by Friday"
             onChange={(e) => setCommand(e.target.value)}
@@ -465,7 +507,7 @@ function Compose({ speech, typing, setTyping, command, setCommand, busy, error, 
       ) : (
         <div className={cx('min-h-[64px] rounded-lg border px-3.5 py-3 text-[14px] leading-relaxed',
           live ? 'border-line bg-sunken text-ink' : 'border-dashed border-line text-subtle')} aria-live="polite">
-          {live || 'Your words will appear here as you speak.'}
+          {live || (lang === 'ta-IN' ? 'நீங்கள் பேசும்போது உங்கள் வார்த்தைகள் இங்கே தோன்றும்.' : 'Your words will appear here as you speak.')}
           {!speech.listening && command && (
             <button type="button" onClick={() => setTyping(true)} className="ml-2 text-[12.5px] text-[var(--brand)] hover:underline cursor-pointer">Edit</button>
           )}

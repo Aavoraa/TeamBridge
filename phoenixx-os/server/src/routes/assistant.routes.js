@@ -4,7 +4,7 @@ import { get } from '../db/index.js';
 import { ok, validate, forbidden } from '../lib/http.js';
 import { DEFAULT_TZ } from '../lib/dueTime.js';
 import {
-  aiConfigured, canUseAssistant, eligibleAssignees, interpretCommand, matchPerson, AssistantUnavailable,
+  aiConfigured, canUseAssistant, eligibleAssignees, interpretCommand, matchPerson, AssistantUnavailable, hasTamil,
 } from '../services/taskAssistant.js';
 
 /**
@@ -41,8 +41,9 @@ router.post('/task/interpret', async (req, res) => {
     draft = await interpretCommand(text, { timezone: tenant?.timezone || DEFAULT_TZ });
   } catch (err) {
     if (err instanceof AssistantUnavailable) {
-      // The web app has a rule-based parser for exactly this case.
-      return ok(res, { engine: 'none', reason: err.message });
+      // The web app has a rule-based parser for exactly this case. It reads
+      // English only, so a Tamil command says so instead of guessing.
+      return ok(res, { engine: 'none', reason: err.message, tamil: hasTamil(text) });
     }
     throw err;
   }
