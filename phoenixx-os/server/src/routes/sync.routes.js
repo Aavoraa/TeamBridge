@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { saveFile, sendStoredFile } from '../services/storage.js';
+import { saveFile, sendStoredFile, readFile } from '../services/storage.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
@@ -16,6 +16,8 @@ import { ok, created, validate, notFound, badRequest, ApiError } from '../lib/ht
 import { config } from '../config.js';
 import { syncDeadline } from './actionItems.routes.js';
 import { canAccessReimbursement } from './reimbursements.routes.js';
+import { canAccessTaskRequest } from './taskRequests.routes.js';
+import { attachmentToPdf } from '../services/attachmentPdf.js';
 
 const router = Router();
 
@@ -398,6 +400,8 @@ const fileRouter = Router();
  */
 const ENTITY_GUARDS = {
   reimbursement: async (auth, entityId) => await canAccessReimbursement(auth, entityId),
+  // A task request's files: the person asking and whoever decides it.
+  task_request: async (auth, entityId) => await canAccessTaskRequest(auth, entityId),
 };
 
 async function assertEntityAccess(req, entity, entityId) {
@@ -455,6 +459,23 @@ fileRouter.delete('/:id', async (req, res) => {
   await assertEntityAccess(req, att.entity, att.entity_id);
   await run('UPDATE attachments SET deleted_at = ? WHERE id = ?', [nowIso(), att.id]);
   return ok(res, { ok: true });
+});
+
+/** An attachment as a PDF: PDFs as they are, images and text converted. */
+fileRouter.get('/:id/pdf', async (req, res) => {
+  const att = await get('SELECT * FROM attachments WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL',
+    [req.params.id, req.auth.tenantId]);
+  if (!att) throw notFound('Attachment');
+  await assertEntityAccess(req, att.entity, att.entity_id);
+  const file = await readFile(att.storage_path);
+  if (!file) throw notFound('File');
+  const pdf = await attachmentToPdf({ data: file.data, mime: att.mime || file.mime, filename: att.filename });
+  if (!pdf) throw new ApiError(415, 'not_convertible', 'This file type cannot be turned into a PDF. Download the original instead.');
+  const name = `${att.filename.replace(/\.[^.]+$/, '').replace(/[^\w.\- ]/g, '_') || 'attachment'}.pdf`;
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Length', pdf.length);
+  res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
+  res.end(pdf);
 });
 
 /** Serves a stored file. The tenant prefix in the path is checked against the caller. */

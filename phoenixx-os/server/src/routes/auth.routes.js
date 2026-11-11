@@ -70,6 +70,9 @@ async function sessionPayload(user) {
     tenant: tenant ? { ...tenant, settings: parseJson(tenant.settings, {}) } : null,
     /** Opens Marketing leads for someone on a marketing project's team, CRM access or not. */
     on_marketing_project: user.tenant_id ? await onMarketingProject({ userId: user.id, tenantId: user.tenant_id, role: user.role }) : false,
+    /** Areas the owner opened to this one person on top of their role (Team > person > Extra access). */
+    extra_modules: Object.entries(parseJson(user.extra_access, {}) || {})
+      .filter(([, a]) => Array.isArray(a) && a.length).map(([m]) => m),
     subscription: subscription
       ? {
         ...subscription,

@@ -1,13 +1,14 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, Inbox, PencilLine, Send, Undo2, X } from 'lucide-react';
+import { Check, FileText, Inbox, Paperclip, PencilLine, Send, Trash2, Undo2, Upload, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { clockTime, date as fmtDate, relative, workspaceToday } from '../lib/format';
 import {
   Avatar, Badge, Button, Card, EmptyState, Field, Input, Modal, Select, Textarea, useToast, cx,
 } from './ui';
+import { ATTACH_ACCEPT, AttachmentList, MAX_FILE_BYTES, uploadAttachment } from './Attachments';
 
 /**
  * Task requests. Only owners and managers hand work to other people, so
@@ -55,6 +56,8 @@ export function RequestTaskModal({ onClose, onSent }: { onClose: () => void; onS
   const toast = useToast();
   const [form, setForm] = useState({ title: '', description: '', project_id: '', priority: 'medium', due_date: '', due_time: '' });
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [files, setFiles] = useState<File[]>([]);
+  const fileRef = useRef<HTMLInputElement>(null);
   const set = (k: string, v: string) => { setForm((f) => ({ ...f, [k]: v })); setErrors((e) => ({ ...e, [k]: '' })); };
 
   const { data: projects } = useQuery({
@@ -64,17 +67,25 @@ export function RequestTaskModal({ onClose, onSent }: { onClose: () => void; onS
   });
 
   const send = useMutation({
-    mutationFn: () => api.post<any>('/task-requests', {
-      title: form.title.trim(),
-      description: form.description.trim() || null,
-      project_id: form.project_id || null,
-      priority: form.priority,
-      due_date: form.due_date || null,
-      due_time: form.due_date ? (form.due_time || null) : null,
-    }),
-    onSuccess: (res: any) => {
+    mutationFn: async () => {
+      const res = await api.post<any>('/task-requests', {
+        title: form.title.trim(),
+        description: form.description.trim() || null,
+        project_id: form.project_id || null,
+        priority: form.priority,
+        due_date: form.due_date || null,
+        due_time: form.due_date ? (form.due_time || null) : null,
+      });
+      const failed: string[] = [];
+      for (const f of files) {
+        try { await uploadAttachment('task_request', res.data.id, f); } catch { failed.push(f.name); }
+      }
+      return { res, failed };
+    },
+    onSuccess: ({ res, failed }: any) => {
       const names = (res.data.approvers || []).map((a: any) => a.name);
       toast.success(`Sent for approval to ${orList(names)}.`);
+      if (failed.length) toast.error(`Could not attach ${failed.join(', ')}. Add it from My requests.`);
       invalidate(qc);
       onSent?.();
       onClose();
@@ -123,6 +134,35 @@ export function RequestTaskModal({ onClose, onSent }: { onClose: () => void; onS
         <Field label="Time" hint={form.due_date ? 'Optional' : 'Set a date first'} error={errors.due_time}>
           <Input type="time" value={form.due_time} disabled={!form.due_date} onChange={(e) => set('due_time', e.target.value)} />
         </Field>
+        <div className="sm:col-span-2">
+          <input ref={fileRef} type="file" multiple className="hidden" accept={ATTACH_ACCEPT}
+            onChange={(e) => {
+              const picked = Array.from(e.target.files || []);
+              e.target.value = '';
+              const tooBig = picked.filter((f) => f.size > MAX_FILE_BYTES);
+              if (tooBig.length) toast.error(`${tooBig.map((f) => f.name).join(', ')} is over 15 MB.`);
+              setFiles((prev) => [...prev, ...picked.filter((f) => f.size <= MAX_FILE_BYTES)]);
+            }} />
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-[13px] font-medium text-ink">Files <span className="font-normal text-subtle">· optional, up to 15 MB each</span></span>
+            <Button size="sm" icon={<Upload size={14} />} onClick={() => fileRef.current?.click()}>Upload file</Button>
+          </div>
+          {!!files.length && (
+            <ul className="mt-2 space-y-1">
+              {files.map((f, i) => (
+                <li key={`${f.name}-${i}`} className="flex items-center gap-2 rounded-md border border-line bg-sunken px-2.5 py-1.5">
+                  <FileText size={14} className="shrink-0 text-subtle" />
+                  <span className="min-w-0 flex-1 truncate text-[13px] text-ink">{f.name}</span>
+                  <span className="shrink-0 text-[11.5px] text-subtle tabular">{Math.max(1, Math.round(f.size / 1024))} KB</span>
+                  <button onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))} aria-label={`Remove ${f.name}`}
+                    className="shrink-0 text-subtle hover:text-[var(--negative)] cursor-pointer">
+                    <Trash2 size={14} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
     </Modal>
   );
@@ -236,6 +276,9 @@ function ReviewCard({ request: r, onReject }: { request: any; onReject: () => vo
             <span>{when(r)}</span>
             {r.project_name && <span>Project: {r.project_name}</span>}
           </p>
+          {Number(r.attachment_count) > 0 && (
+            <div className="mt-3"><AttachmentList entity="task_request" entityId={r.id} /></div>
+          )}
         </div>
         <div className="flex w-full gap-2 sm:w-auto sm:flex-col">
           <Button variant="primary" icon={<Check size={15} />} loading={approve.isPending} onClick={() => approve.mutate()}
@@ -343,8 +386,11 @@ function MineRow({ request: r }: { request: any }) {
     onError: (e: any) => { toast.error(e.message); invalidate(qc); },
   });
   const ui = STATUS_UI[r.status] || STATUS_UI.pending;
+  const count = Number(r.attachment_count) || 0;
+  const [showFiles, setShowFiles] = useState(false);
   return (
-    <div className="flex flex-wrap items-start gap-3 px-4 py-3.5">
+    <div className="px-4 py-3.5">
+    <div className="flex flex-wrap items-start gap-3">
       <div className="min-w-0 flex-1">
         <p className="flex flex-wrap items-center gap-2">
           <span className="text-[14px] font-medium text-ink break-words">{r.title}</span>
@@ -362,6 +408,11 @@ function MineRow({ request: r }: { request: any }) {
           {r.status === 'rejected' && `${r.decided_by_name}: ${r.decision_note}`}
         </p>
       </div>
+      {(count > 0 || r.status === 'pending') && (
+        <Button size="sm" variant="ghost" icon={<Paperclip size={14} />} onClick={() => setShowFiles((v) => !v)}>
+          {count ? `Files (${count})` : 'Add files'}
+        </Button>
+      )}
       {r.status === 'pending' && (
         <Button size="sm" variant="ghost" icon={<Undo2 size={14} />} loading={withdraw.isPending} onClick={() => withdraw.mutate()}>
           Withdraw
@@ -372,6 +423,13 @@ function MineRow({ request: r }: { request: any }) {
           Open task
         </Button>
       )}
+    </div>
+    {showFiles && (
+      <div className="mt-3">
+        <AttachmentList entity="task_request" entityId={r.id}
+          canUpload={r.status === 'pending'} canRemove={r.status === 'pending'} />
+      </div>
+    )}
     </div>
   );
 }

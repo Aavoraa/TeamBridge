@@ -36,6 +36,8 @@ interface Session {
   user: SessionUser;
   /** On a marketing project's team: Marketing leads opens even without CRM access. */
   on_marketing_project?: boolean;
+  /** Areas the owner opened to this person on top of their role. */
+  extra_modules?: string[];
   tenant: Tenant | null;
   subscription: Subscription | null;
   permissions: Permissions;

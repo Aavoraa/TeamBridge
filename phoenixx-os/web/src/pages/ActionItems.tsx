@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Plus, Filter, Download, ArrowUpRight, X, MessageSquare, Paperclip, Repeat,
   CheckCircle2, ListChecks, LayoutGrid, List, AlertTriangle, Trash2, Users2, User,
-  ClipboardList, CircleAlert, PencilLine, Clock, ShieldCheck, Undo2, History, Mic, Square, Volume2,
+  ClipboardList, CircleAlert, Pencil, PencilLine, Clock, ShieldCheck, Undo2, History, Mic, Square, Volume2,
   ListTodo, Send,
 } from 'lucide-react';
 import { api } from '../lib/api';
@@ -17,6 +17,7 @@ import {
 } from '../lib/format';
 import { DailyUpdateModal, UpdateCard, NeedsUpdateRow } from '../components/DailyUpdate';
 import { RequestTaskModal, TaskRequestsView, assignsWork, useTaskRequestCount } from '../components/TaskRequests';
+import { AttachmentList } from '../components/Attachments';
 import {
   Avatar, AvatarWithName, Badge, Button, Card, CardHeader, Checkbox, ConfirmDialog, Drawer,
   EmptyState, ErrorState, Field, Input, Modal, PageHeader, SearchInput, Select, StatusBadge,
@@ -1561,6 +1562,7 @@ function ItemDrawer({ id, meta, onClose }: { id: string; meta: any; onClose: () 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const [validateOpen, setValidateOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
 
   const { data: item, isLoading } = useQuery({
     queryKey: ['action-item', id],
@@ -1624,6 +1626,9 @@ function ItemDrawer({ id, meta, onClose }: { id: string; meta: any; onClose: () 
           <>
             {can('action_items', 'delete') && (
               <Button variant="ghost" icon={<Trash2 size={15} />} onClick={() => setDeleteOpen(true)}>Delete</Button>
+            )}
+            {can('action_items', 'edit') && (
+              <Button icon={<Pencil size={15} />} onClick={() => setEditOpen(true)}>Edit</Button>
             )}
             {onTask && item.status !== 'done' && (
               <Button icon={<PencilLine size={15} />} onClick={() => setLogOpen(true)}>
@@ -1903,6 +1908,11 @@ function ItemDrawer({ id, meta, onClose }: { id: string; meta: any; onClose: () 
             )}
           </div>
 
+          {/* ------------------------------------------------------ files */}
+          <AttachmentList entity="action_item" entityId={item.id}
+            canUpload={can('action_items', 'edit') || item.owner_id === user?.id}
+            canRemove={can('action_items', 'edit') || item.owner_id === user?.id} />
+
           {/* --------------------------------------------------- comments */}
           <div>
             <p className="label-cap mb-2">Comments {item.comments?.length > 0 && `(${item.comments.length})`}</p>
@@ -1937,6 +1947,8 @@ function ItemDrawer({ id, meta, onClose }: { id: string; meta: any; onClose: () 
 
       {escalateOpen && <EscalateModal id={id} item={item} meta={meta} onClose={() => setEscalateOpen(false)} />}
 
+      {editOpen && <EditItemModal item={item} meta={meta} onClose={() => setEditOpen(false)} onSaved={invalidate} />}
+
       {validateOpen && (
         <ValidateModal item={item} onClose={() => setValidateOpen(false)} onDone={invalidate} />
       )}
@@ -1963,6 +1975,145 @@ const Detail = ({ label, value }: { label: string; value?: string | null }) => (
     </div>
   ) : null
 );
+
+/**
+ * Everything about a task that the drawer's inline controls do not cover:
+ * what it is, what it is for, and who else works it. Status, priority, the
+ * accountable person and the due date stay inline, where they change most.
+ */
+function EditItemModal({ item, meta, onClose, onSaved }: {
+  item: any; meta: any; onClose: () => void; onSaved: () => void;
+}) {
+  const toast = useToast();
+  const { user } = useAuth();
+  const canStaff = assignsWork(user?.role);
+  const [form, setForm] = useState({
+    title: item.title || '',
+    description: item.description || '',
+    client_id: item.client_id || '',
+    project_id: item.project_id || '',
+    category_id: item.category_id || '',
+    recurrence: item.recurrence || 'none',
+    estimate_minutes: item.estimate_minutes != null ? String(item.estimate_minutes) : '',
+  });
+  // The extras: everyone on the task except the accountable owner.
+  const [helpers, setHelpers] = useState<string[]>(
+    (item.assignees || []).filter((a: any) => !a.accountable && a.user_id !== item.owner_id).map((a: any) => a.user_id),
+  );
+  const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  // The current extras may fall outside who this person can assign; keep them listed.
+  const people = useMemo(() => {
+    const byId = new Map<string, any>();
+    for (const a of item.assignees || []) if (a.user_id !== item.owner_id) byId.set(a.user_id, { id: a.user_id, name: a.name });
+    for (const u of meta?.assignable || []) if (u.id !== item.owner_id) byId.set(u.id, u);
+    return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [item, meta]);
+
+  const save = useMutation({
+    mutationFn: () => api.patch(`/action-items/${item.id}`, {
+      title: form.title.trim(),
+      description: form.description.trim() || null,
+      client_id: form.client_id || null,
+      project_id: form.project_id || null,
+      category_id: form.category_id || null,
+      recurrence: form.recurrence === 'none' ? null : form.recurrence,
+      estimate_minutes: form.estimate_minutes ? Number(form.estimate_minutes) : null,
+      ...(canStaff ? { assignee_ids: helpers } : {}),
+    }),
+    onSuccess: () => { toast.success('Task updated.'); onSaved(); onClose(); },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  return (
+    <Modal open onClose={onClose} title="Edit action item" size="md"
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" loading={save.isPending} disabled={form.title.trim().length < 2}
+            onClick={() => save.mutate()}>Save changes</Button>
+        </>
+      }>
+      <div className="space-y-4">
+        <Field label="Title" required>
+          <Input value={form.title} onChange={(e) => set('title', e.target.value)} autoFocus />
+        </Field>
+        <Field label="Description">
+          <Textarea rows={4} value={form.description} onChange={(e) => set('description', e.target.value)}
+            placeholder="Context, links, what 'done' looks like…" />
+        </Field>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Client">
+            <Select value={form.client_id} onChange={(e) => set('client_id', e.target.value)}>
+              <option value="">No client</option>
+              {item.client_id && !meta?.clients?.some((c: any) => c.id === item.client_id) && (
+                <option value={item.client_id}>{item.client_name || 'Current client'}</option>
+              )}
+              {meta?.clients?.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </Select>
+          </Field>
+          <Field label="Project">
+            <Select value={form.project_id} onChange={(e) => set('project_id', e.target.value)}>
+              <option value="">No project</option>
+              {item.project_id && !meta?.projects?.some((p: any) => p.id === item.project_id) && (
+                <option value={item.project_id}>{item.project_name || 'Current project'}</option>
+              )}
+              {meta?.projects?.map((p: any) => (
+                <option key={p.id} value={p.id}>{p.name}{p.client_name ? ` · ${p.client_name}` : ''}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Category" hint="Sets how many days before it escalates">
+            <Select value={form.category_id} onChange={(e) => set('category_id', e.target.value)}>
+              <option value="">None</option>
+              {meta?.categories?.map((c: any) => (
+                <option key={c.id} value={c.id}>{c.name} · escalates after {c.escalation_days}d</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Repeats">
+            <Select value={form.recurrence} onChange={(e) => set('recurrence', e.target.value)}>
+              <option value="none">Does not repeat</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+            </Select>
+          </Field>
+        </div>
+
+        <Field label="Estimated effort (minutes)">
+          <Input type="number" min={0} step={30} value={form.estimate_minutes}
+            onChange={(e) => set('estimate_minutes', e.target.value)} placeholder="120" />
+        </Field>
+
+        <Field label="Also working on it"
+          hint={canStaff
+            ? `${item.owner_name || 'The accountable person'} stays accountable; these people help`
+            : 'Only owners and managers change who works on a task'}>
+          <div className={cx('max-h-[30vh] divide-y divide-[var(--line)] overflow-y-auto rounded-lg border border-line',
+            !canStaff && 'opacity-60')}>
+            {!people.length ? <p className="p-3 text-[13px] text-subtle">Nobody else to add.</p> : people.map((u: any) => (
+              <label key={u.id} className={cx('flex items-center gap-3 px-2.5 py-2',
+                canStaff ? 'cursor-pointer' : 'cursor-not-allowed', helpers.includes(u.id) && 'bg-sunken')}>
+                <input type="checkbox" disabled={!canStaff} checked={helpers.includes(u.id)}
+                  onChange={() => setHelpers((h) => (h.includes(u.id) ? h.filter((x) => x !== u.id) : [...h, u.id]))}
+                  className="h-4 w-4 accent-[var(--brand)]" />
+                <Avatar name={u.name} url={u.avatar_url} size={24} />
+                <span className="truncate text-[13px] text-ink">{u.name}</span>
+              </label>
+            ))}
+          </div>
+        </Field>
+
+        <div>
+          <AttachmentList entity="action_item" entityId={item.id} canUpload canRemove />
+          <p className="mt-1.5 text-[12px] text-subtle">Files are added or removed straight away, without pressing Save.</p>
+        </div>
+      </div>
+    </Modal>
+  );
+}
 
 function EscalateModal({ id, item, meta, onClose }: { id: string; item: any; meta: any; onClose: () => void }) {
   const qc = useQueryClient();
