@@ -12,11 +12,12 @@ import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { announceCheckIn } from '../components/TodoReminders';
 import { PerformanceTab } from '../components/Performance';
+import { MemberDrawer } from './Team';
 import {
   date, dateTime, time, monthLabel, percent, relative, money, titleCase, clockTime,
 } from '../lib/format';
 import {
-  Avatar, AvatarWithName, Badge, Button, Card, CardHeader, EmptyState, ErrorState, Field, Input,
+  Avatar, AvatarWithName, Badge, Button, Card, CardHeader, ConfirmDialog, EmptyState, ErrorState, Field, Input,
   Meter, Modal, PageHeader, Select, Stat, StatusBadge, Table, TableSkeleton, TD, TH, THead, TR,
   Tabs, Textarea, useToast, cx,
 } from '../components/ui';
@@ -480,8 +481,13 @@ function MonthStats({ totals, personal }: { totals: any; personal?: boolean }) {
 function RegisterGrid({ reg, onOpenDay }: {
   reg: any; onOpenDay: (d: { userId: string; date: string }) => void;
 }) {
+  const { can } = useAuth();
+  // A name opens that person's details, for anyone allowed to see them.
+  const canOpen = can('employees', 'view');
+  const [personId, setPersonId] = useState<string | null>(null);
   return (
     <div className="overflow-x-auto">
+      {personId && <MemberDrawer id={personId} onClose={() => setPersonId(null)} />}
       <table className="w-full text-sm border-collapse">
         <thead className="bg-sunken">
           <tr>
@@ -507,7 +513,14 @@ function RegisterGrid({ reg, onOpenDay }: {
           {reg.rows.map((row: any) => (
             <tr key={row.user.id} className="row-hover">
               <td className="px-3 py-2 border-b border-line sticky left-0 bg-raised z-10">
-                <AvatarWithName name={row.user.name} url={row.user.avatar_url} sub={row.user.designation} size={26} />
+                {canOpen ? (
+                  <button type="button" onClick={() => setPersonId(row.user.id)} title={`View ${row.user.name}'s details`}
+                    className="text-left rounded-md -m-1 p-1 hover:bg-sunken focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand [&_span]:hover:underline">
+                    <AvatarWithName name={row.user.name} url={row.user.avatar_url} sub={row.user.designation} size={26} />
+                  </button>
+                ) : (
+                  <AvatarWithName name={row.user.name} url={row.user.avatar_url} sub={row.user.designation} size={26} />
+                )}
               </td>
               {row.cells.map((c: any) => {
                 const m = statusMeta(c.status);
@@ -1421,8 +1434,33 @@ function LeaveTab() {
     onError: (e: any) => toast.error(e.message),
   });
 
+  const [toDelete, setToDelete] = useState<any>(null);
+  const remove = useMutation({
+    mutationFn: (id: string) => api.del(`/hr/leave/requests/${id}`),
+    onSuccess: () => {
+      toast.success('Request deleted.');
+      setToDelete(null);
+      qc.invalidateQueries({ queryKey: ['leave-requests'] });
+      qc.invalidateQueries({ queryKey: ['leave-balances'] });
+      qc.invalidateQueries({ queryKey: ['home-counters'] });
+      qc.invalidateQueries({ queryKey: ['attendance'] });
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
   return (
     <>
+      <ConfirmDialog open={!!toDelete} onClose={() => setToDelete(null)}
+        onConfirm={() => toDelete && remove.mutate(toDelete.id)} loading={remove.isPending}
+        title="Delete this request?" danger confirmLabel="Delete"
+        message={toDelete && (
+          <>
+            {toDelete.user_name}'s {toDelete.leave_type_name} for{' '}
+            {toDelete.from_date === toDelete.to_date ? date(toDelete.from_date) : `${date(toDelete.from_date, 'day')} – ${date(toDelete.to_date)}`}
+            {' '}is removed for good.
+            {toDelete.status === 'approved' && ' Any balance it used is given back, and a late check-in it excused goes back to HR for review.'}
+          </>
+        )} />
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-5 mb-5">
         {balances.data?.map((b: any) => (
           <Card key={b.leave_type_id} className="p-3.5">
@@ -1463,6 +1501,7 @@ function LeaveTab() {
                   <TH width="70px">Days</TH>
                   <TH>Reason</TH>
                   <TH width="180px">Status</TH>
+                  <TH width="48px"><span className="sr-only">Actions</span></TH>
                 </tr>
               </THead>
               <tbody>
@@ -1528,6 +1567,15 @@ function LeaveTab() {
                         </span>
                       )}
                     </TD>
+                    <TD>
+                      {r.can_delete && (
+                        <button type="button" onClick={() => setToDelete(r)}
+                          title="Delete request" aria-label={`Delete ${r.user_name}'s request`}
+                          className="grid place-items-center h-8 w-8 rounded-md text-subtle hover:text-[var(--danger,#dc2626)] hover:bg-sunken">
+                          <Trash2 size={15} />
+                        </button>
+                      )}
+                    </TD>
                   </TR>
                 ))}
               </tbody>
@@ -1575,9 +1623,18 @@ function ApplyLeaveModal({ onClose }: { onClose: () => void }) {
   const permMinutes = permission && form.from_time && form.to_time
     ? (Number(form.to_time.slice(0, 2)) * 60 + Number(form.to_time.slice(3))) - (Number(form.from_time.slice(0, 2)) * 60 + Number(form.from_time.slice(3)))
     : 0;
-  const days = form.from_date && form.to_date
-    ? Math.max(1, Math.round((new Date(form.to_date).getTime() - new Date(form.from_date).getTime()) / 86_400_000) + 1)
-    : form.from_date ? 1 : 0;
+  // The server counts the days, leaving out Sundays, so the
+  // form shows exactly what will be taken from the balance.
+  const rangeReady = !permission && !!form.from_date && !!form.to_date && form.to_date >= form.from_date;
+  const count = useQuery({
+    queryKey: ['leave-days', form.from_date, form.to_date],
+    queryFn: () => api.get('/hr/leave/days', { from: form.from_date, to: form.to_date }).then((r) => r.data),
+    enabled: rangeReady,
+    staleTime: 60_000,
+  });
+  const days: number = rangeReady ? (count.data?.days ?? 0) : 0;
+  const skipped: { date: string; reason: string; name?: string }[] = rangeReady ? (count.data?.skipped ?? []) : [];
+  const allOff = rangeReady && count.isSuccess && days === 0;
 
   return (
     <Modal open onClose={onClose} title="Apply for leave"
@@ -1586,7 +1643,7 @@ function ApplyLeaveModal({ onClose }: { onClose: () => void }) {
           <Button onClick={onClose}>Cancel</Button>
           <Button variant="primary" loading={apply.isPending}
             disabled={!form.leave_type_id || !form.from_date || form.reason.trim().length < 3
-              || (permission && permMinutes <= 0)}
+              || (permission && permMinutes <= 0) || allOff || (rangeReady && count.isLoading)}
             onClick={() => apply.mutate()}>
             Submit{permission
               ? permMinutes > 0 && ` · ${Math.floor(permMinutes / 60)}h ${String(permMinutes % 60).padStart(2, '0')}m`
@@ -1644,6 +1701,12 @@ function ApplyLeaveModal({ onClose }: { onClose: () => void }) {
             </>
           )}
         </div>
+        {!permission && skipped.length > 0 && (
+          <p className={cx('text-[12.5px] -mt-1', allOff ? 'text-[var(--danger,#dc2626)]' : 'text-subtle')}>
+            {allOff ? 'That is a Sunday, so there is no leave to take: ' : 'Not counted: '}
+            {skipped.map((d) => `${date(d.date, 'day')} (Sunday)`).join(', ')}
+          </p>
+        )}
         <Field label="Reason" required>
           <Textarea value={form.reason} onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))} rows={3}
             placeholder="Family function out of town." />

@@ -13,7 +13,7 @@ import {
   PENDING, decorate, dayKind, historyFor, holidaysBetween, hoursLabel, logAttendance,
   scheduleFor, tzFor, workDayFor, workspaceSchedule, workMinutes, assessCheckIn,
   weekOffDays, weekdayOf, permissionCovering, minutesAtCheckout, statusAtCheckout,
-  keepsAttendance, NO_ATTENDANCE_SQL,
+  keepsAttendance, NO_ATTENDANCE_SQL, leaveDaysBetween,
 } from '../services/attendance.js';
 import {
   METHOD as NETWORK_METHOD, checkEnabled, isPrivateRange, isTooBroad, matchNetwork,
@@ -1331,6 +1331,16 @@ function canDecideLeave(auth, lr) {
   return (lr.stage || 'hr') === 'manager' ? lr.manager_id === auth.userId : isHrApprover(auth);
 }
 
+/** How many days of leave a range takes, for the apply form to show before it is sent. */
+router.get('/leave/days', requires('hr_leave', 'view'), async (req, res) => {
+  const { from, to } = req.query;
+  if (!DUE_DATE_RE.test(String(from || '')) || !DUE_DATE_RE.test(String(to || '')) || to < from) {
+    throw badRequest('Give a from and to date');
+  }
+  if (daysBetween(from, to) > 366) throw badRequest('That range is longer than a year');
+  return ok(res, await leaveDaysBetween(req.auth.tenantId, from, to));
+});
+
 router.get('/leave/requests', requires('hr_leave', 'view'), async (req, res) => {
   const { page, limit, offset } = paginate(req);
   const canApprove = await can(req.auth, 'hr_leave', 'approve');
@@ -1361,7 +1371,12 @@ router.get('/leave/requests', requires('hr_leave', 'view'), async (req, res) => 
       WHERE ${where} ORDER BY l.from_date DESC LIMIT ? OFFSET ?`,
     [...params, limit, offset],
   );
-  return ok(res, rows.map((r) => ({ ...r, can_decide: canDecideLeave(req.auth, r) })), pageMeta(page, limit, total));
+  const removesAny = await can(req.auth, 'hr_leave', 'delete');
+  return ok(res, rows.map((r) => ({
+    ...r,
+    can_decide: canDecideLeave(req.auth, r),
+    can_delete: canDeleteLeave(req.auth, r, removesAny),
+  })), pageMeta(page, limit, total));
 });
 
 router.post('/leave/requests', requires('hr_leave', 'create'), async (req, res) => {
@@ -1382,7 +1397,12 @@ router.post('/leave/requests', requires('hr_leave', 'create'), async (req, res) 
     [body.leave_type_id, tenantId]);
   if (!type) throw notFound('Leave type');
 
-  const days = body.kind === 'permission' ? 0.25 : daysBetween(body.from_date, body.to_date) + 1;
+  let days = 0.25;
+  if (body.kind !== 'permission') {
+    // Sundays inside the range are not leave.
+    ({ days } = await leaveDaysBetween(tenantId, body.from_date, body.to_date));
+    if (!days) throw badRequest('That is a Sunday, so there is no leave to take');
+  }
 
   const overlap = await get(
     `SELECT id FROM leave_requests WHERE tenant_id = ? AND user_id = ? AND status IN ('pending','approved')
@@ -1524,15 +1544,53 @@ router.post('/leave/requests/:id/decide', requires('hr_leave', 'approve'), async
   return ok(res, await get('SELECT * FROM leave_requests WHERE id = ?', [lr.id]));
 });
 
-router.delete('/leave/requests/:id', requires('hr_leave', 'create'), async (req, res) => {
-  const lr = await get('SELECT * FROM leave_requests WHERE id = ? AND tenant_id = ?', [req.params.id, req.auth.tenantId]);
-  if (!lr) throw notFound('Leave request');
-  if (lr.user_id !== req.auth.userId && !await can(req.auth, 'hr_leave', 'delete')) throw forbidden();
-  if (lr.status === 'approved' && lr.from_date <= todayIso()) throw badRequest('Leave that has already started cannot be withdrawn');
+/**
+ * Who may delete a leave or permission request. The owner and HR (hr_leave
+ * delete) remove any of them; the person who applied removes their own, except
+ * approved leave that has already begun - by then it is part of the attendance
+ * record and HR takes it out.
+ */
+function canDeleteLeave(auth, lr, removesAny) {
+  if (removesAny) return true;
+  if (lr.user_id !== auth.userId) return false;
+  return !(lr.status === 'approved' && lr.from_date <= todayIso());
+}
 
-  await run("UPDATE leave_requests SET status = 'withdrawn', updated_at = ? WHERE id = ?", [nowIso(), lr.id]);
-  await resolveDeadline(req.auth.tenantId, 'leave', lr.id, 'cancelled');
-  return ok(res, { ok: true });
+router.delete('/leave/requests/:id', requires('hr_leave', 'create'), async (req, res) => {
+  const { tenantId, userId } = req.auth;
+  const lr = await get('SELECT * FROM leave_requests WHERE id = ? AND tenant_id = ?', [req.params.id, tenantId]);
+  if (!lr) throw notFound('Leave request');
+  const removesAny = await can(req.auth, 'hr_leave', 'delete');
+  if (!canDeleteLeave(req.auth, lr, removesAny)) {
+    if (lr.user_id !== userId) throw forbidden();
+    throw badRequest('This leave has already started. Ask HR to remove it.');
+  }
+
+  await tx(async () => {
+    // A late check-in this permission excused is no longer excused: it goes
+    // back to HR to look at, rather than staying "present" on a request that
+    // no longer exists.
+    const covered = await all(
+      "SELECT * FROM attendance WHERE tenant_id = ? AND permission_id = ? AND status = 'present'", [tenantId, lr.id]);
+    const ts = nowIso();
+    for (const row of covered) {
+      await run(
+        `UPDATE attendance SET status = ?, permission_id = NULL, review_reason = 'late', approved_by = NULL,
+           approved_at = NULL, approval_note = NULL, updated_at = ? WHERE id = ?`,
+        [PENDING, ts, row.id],
+      );
+      await logAttendance({
+        tenantId, attendanceId: row.id, userId: row.user_id, workDate: row.work_date, event: 'reopened',
+        actorId: userId, fromStatus: row.status, toStatus: PENDING,
+        note: 'The hourly permission that covered this late check-in was deleted',
+      });
+    }
+    await run('UPDATE attendance SET permission_id = NULL WHERE tenant_id = ? AND permission_id = ?', [tenantId, lr.id]);
+    await run('DELETE FROM leave_requests WHERE id = ? AND tenant_id = ?', [lr.id, tenantId]);
+  });
+  await resolveDeadline(tenantId, 'leave', lr.id, 'cancelled');
+  await audit(req, { entity: 'leave_request', entityId: lr.id, action: 'delete', before: lr });
+  return ok(res, { id: lr.id, deleted: true });
 });
 
 /** C2 - team availability calendar. */

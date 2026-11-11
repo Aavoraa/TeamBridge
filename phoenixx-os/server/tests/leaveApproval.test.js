@@ -46,6 +46,8 @@ const typeId = types[0].id;
 let day = 10;
 const apply = async (who) => {
   day += 2;
+  // Never a Sunday (the default weekly off), which is not a day of leave.
+  if (new Date(`2031-03-${String(day).padStart(2, '0')}T12:00:00Z`).getUTCDay() === 0) day += 1;
   const date = `2031-03-${String(day).padStart(2, '0')}`;
   const res = await api.post('/hr/leave/requests', {
     leave_type_id: typeId, from_date: date, to_date: date, reason: 'Family function',

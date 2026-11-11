@@ -144,6 +144,23 @@ export async function dayKind(tenantId, dateStr, holidays = null) {
   return { kind: 'working', holiday: null };
 }
 
+/**
+ * How many days a leave from `from` to `to` (inclusive) takes. Sundays are
+ * not counted - leave from Saturday to Monday is two days, not three - and are
+ * returned so the form can say which days were left out. Holidays inside the
+ * range are counted as leave, as the workspace asked.
+ */
+export async function leaveDaysBetween(tenantId, from, to) {
+  const skipped = [];
+  let days = 0;
+  for (let d = new Date(`${from}T12:00:00Z`); d <= new Date(`${to}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + 1)) {
+    const date = d.toISOString().slice(0, 10);
+    if (d.getUTCDay() === 0) skipped.push({ date, reason: 'sunday' });
+    else days += 1;
+  }
+  return { days, skipped };
+}
+
 /** Nobody is expected to check in on a holiday or a weekly off. */
 export const isWorkingDay = async (tenantId, dateStr) => (await dayKind(tenantId, dateStr)).kind === 'working';
 
