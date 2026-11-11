@@ -517,12 +517,12 @@ function RegisterGrid({ reg, onOpenDay }: {
                     <button
                       type="button"
                       onClick={() => onOpenDay({ userId: row.user.id, date: c.date })}
-                      title={`${date(c.date)} — ${m.label}${c.work_minutes ? ` · ${Math.floor(c.work_minutes / 60)}h${String(c.work_minutes % 60).padStart(2, '0')}m` : ''}`}
+                      title={`${date(c.date)} — ${m.label}${c.extra_day ? ` (extra day, ${c.extra_day === 'weekoff' ? 'weekly off' : 'holiday'})` : ''}${c.work_minutes ? ` · ${Math.floor(c.work_minutes / 60)}h${String(c.work_minutes % 60).padStart(2, '0')}m` : ''}`}
                       aria-label={`${row.user.name}, ${date(c.date)}: ${m.label}`}
                       className={cx('inline-block h-4 w-4 rounded-sm cursor-pointer align-middle',
                         'hover:ring-2 hover:ring-[var(--brand)] hover:ring-offset-1 hover:ring-offset-[var(--raised)]',
                         'focus-visible:ring-2 focus-visible:ring-[var(--brand)] transition-shadow',
-                        m.swatch)}
+                        m.swatch, c.extra_day && 'ring-2 ring-[var(--info,#2563eb)] ring-offset-1 ring-offset-[var(--raised)]')}
                     />
                   </td>
                 );
@@ -750,8 +750,10 @@ function DayDetailModal({ userId, workDate, canCorrect, onClose }: {
   // Any past or present working day can be marked by hand, recorded or not.
   const canMark = canCorrect && data?.day_kind === 'working'
     && workDate <= new Date().toLocaleDateString('en-CA', { timeZone: data?.schedule?.timezone || 'Asia/Kolkata' });
-  const meta = statusMeta(data?.day_kind === 'holiday' ? 'holiday'
-    : data?.day_kind === 'weekoff' ? 'weekoff' : a?.status);
+  const offDay = data?.day_kind === 'holiday' || data?.day_kind === 'weekoff';
+  // A check-in on an off day is shown as worked; otherwise the off day itself.
+  const meta = statusMeta(a ? a.status : data?.day_kind === 'holiday' ? 'holiday'
+    : data?.day_kind === 'weekoff' ? 'weekoff' : undefined);
 
   return (
     <Modal open onClose={onClose} title={data?.user?.name || 'Attendance'}
@@ -793,9 +795,10 @@ function DayDetailModal({ userId, workDate, canCorrect, onClose }: {
               <span className="text-[13px] text-muted">{data.holiday.name}</span>
             )}
             {a?.checkout_missing && <Badge tone="warning">Check-out missing</Badge>}
+            {a && offDay && <Badge tone="info">Extra day · {data.day_kind === 'weekoff' ? 'weekly off' : 'holiday'}</Badge>}
           </div>
 
-          {data.day_kind !== 'working' ? (
+          {data.day_kind !== 'working' && !a ? (
             <p className="text-[13.5px] text-muted">
               Nobody was expected in. {data.day_kind === 'weekoff' ? 'Weekly off.' : 'Company holiday.'}
             </p>

@@ -1066,13 +1066,19 @@ router.get('/attendance/register', requires('hr_attendance', 'view'), async (req
 
     const cells = days.map((day) => {
       const base = { date: day.date, week_off: day.week_off, future: day.future };
-      if (day.holiday) return { ...base, status: 'holiday', holiday: day.holiday.name };
-      if (day.week_off) return { ...base, status: 'weekoff' };
-
+      const offDay = !!(day.holiday || day.week_off);
+      // Someone who checked in on a weekly off or a holiday worked that day:
+      // the check-in wins, marked as an extra day so it is not mistaken for a
+      // missed working day and does not count against the month.
       const rec = mine.find((r) => r.work_date === day.date);
+      if (!rec) {
+        if (day.holiday) return { ...base, status: 'holiday', holiday: day.holiday.name };
+        if (day.week_off) return { ...base, status: 'weekoff' };
+      }
       if (rec) {
         return {
           ...base,
+          ...(offDay ? { extra_day: day.holiday ? 'holiday' : 'weekoff', holiday: day.holiday?.name } : {}),
           status: rec.status,
           attendance_id: rec.id,
           work_minutes: rec.work_minutes,
@@ -1089,8 +1095,11 @@ router.get('/attendance/register', requires('hr_attendance', 'view'), async (req
     });
 
     const count = (...statuses) => cells.filter((c) => statuses.includes(c.status)).length;
-    const present = count('present', 'wfh');
-    const halfDay = count('half_day');
+    // The month's attendance is measured on working days; work on an off day is counted on its own.
+    const onWorkingDays = (...statuses) => cells.filter((c) => !c.extra_day && statuses.includes(c.status)).length;
+    const present = onWorkingDays('present', 'wfh');
+    const halfDay = onWorkingDays('half_day');
+    const extraDays = cells.filter((c) => c.extra_day && ['present', 'wfh', 'half_day'].includes(c.status)).length;
     const leave = count('leave');
 
     return {
@@ -1103,6 +1112,7 @@ router.get('/attendance/register', requires('hr_attendance', 'view'), async (req
         absent: count('absent', 'not_approved'),
         pending: count(PENDING),
         week_off: count('weekoff'),
+        extra_days: extraDays,
         holiday: count('holiday'),
         not_marked: cells.filter((c) => c.status === null).length,
         working_days: workingDayCount,
@@ -1121,7 +1131,7 @@ router.get('/attendance/register', requires('hr_attendance', 'view'), async (req
 
   // The month at a glance, across whoever survived the filters.
   const totals = rows.reduce((a, r) => {
-    for (const k of ['present', 'half_day', 'leave', 'absent', 'pending', 'week_off', 'holiday', 'not_marked']) {
+    for (const k of ['present', 'half_day', 'leave', 'absent', 'pending', 'week_off', 'holiday', 'not_marked', 'extra_days']) {
       a[k] = (a[k] || 0) + r.summary[k];
     }
     return a;

@@ -604,3 +604,41 @@ describe('HR and Finance logins are not on the register', () => {
     assert.equal((await api.post('/hr/attendance/check-in', {}, { token: hr.token })).status, 403);
   });
 });
+
+// ------------------------------------------------- work on a day off
+describe('working on a weekly off', () => {
+  test('a check-in on a weekly off shows as worked, marked as an extra day, and does not inflate the month', async () => {
+    await db.run("UPDATE tenants SET week_off_days = '[0]' WHERE id = ?", [tenantId]);
+    // The last Sunday at least two weeks back, so it is always in the past.
+    let n = -14;
+    while (new Date(`${shiftDay(n)}T12:00:00Z`).getUTCDay() !== 0) n -= 1;
+    const sunday = shiftDay(n);
+    const month = sunday.slice(0, 7);
+    const regFor = async () => (await api.get(`/hr/attendance/register?month=${month}`, { token: hr.token }))
+      .body.data.rows.find((r) => r.user.id === priya.id);
+
+    const before = await regFor();
+    assert.equal(before.cells.find((c) => c.date === sunday).status, 'weekoff');
+
+    await db.run(
+      `INSERT INTO attendance (id, tenant_id, user_id, work_date, check_in_at, check_out_at,
+         source, status, work_minutes, late_minutes, created_at, updated_at)
+       VALUES (?,?,?,?,?,?, 'web', 'present', 300, 0, ?, ?)`,
+      ['att-sunday-work', tenantId, priya.id, sunday,
+        localToUtc(sunday, '10:00', TZ).toISOString(), localToUtc(sunday, '15:00', TZ).toISOString(),
+        new Date().toISOString(), new Date().toISOString()],
+    );
+
+    const after = await regFor();
+    const cell = after.cells.find((c) => c.date === sunday);
+    assert.equal(cell.status, 'present', 'the check-in wins over the weekly off');
+    assert.equal(cell.extra_day, 'weekoff');
+    assert.equal(cell.work_minutes, 300);
+    assert.equal(after.summary.extra_days, before.summary.extra_days + 1);
+    assert.equal(after.summary.attendance_pct, before.summary.attendance_pct, 'the month is measured on working days');
+    assert.equal(after.summary.present, before.summary.present);
+
+    const day = await dayFor(priya.id, sunday);
+    assert.equal(day.body.data.attendance.status, 'present', 'the day panel shows the check-in too');
+  });
+});
