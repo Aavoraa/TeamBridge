@@ -514,7 +514,7 @@ function InviteModal({ onClose }: { onClose: () => void }) {
 }
 
 /* ---------------------------------------------------------------- drawer */
-function MemberDrawer({ id, onClose }: { id: string; onClose: () => void }) {
+export function MemberDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
   const { can, user: me } = useAuth();

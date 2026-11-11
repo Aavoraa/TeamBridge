@@ -164,7 +164,7 @@ router.get('/:id', requires('employees', 'view'), async (req, res) => {
       assigned: Number(items.assigned || 0),
       done: Number(items.done || 0),
       completion_pct: pct(Number(items.done || 0), Number(items.assigned || 0)),
-      attendance_pct: (async () => {
+      attendance_pct: await (async () => {
         const a = await get(
           `SELECT COUNT(*) AS n, COUNT(CASE WHEN status IN ('present','wfh') THEN 1 END) AS p
              FROM attendance WHERE tenant_id = ? AND user_id = ? AND work_date BETWEEN ? AND ?`,
