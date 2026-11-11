@@ -5,7 +5,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { X, ChevronDown, Check, AlertCircle, Loader2, Inbox, Search, ArrowUp, ArrowDown, Eye, EyeOff } from 'lucide-react';
-import { useStockPhoto, avatarTint } from '../lib/avatar';
+import { useStockPhoto, avatarTint, photoUrl } from '../lib/avatar';
 import { initials, avatarStyle } from '../lib/format';
 
 export const cx = (...parts: (string | false | null | undefined)[]) => parts.filter(Boolean).join(' ');
@@ -650,7 +650,7 @@ export function Avatar({ name, url, size = 28, className }: {
 }) {
   const s = Math.round(size * AVATAR_SCALE);
   const stock = useStockPhoto(url ? null : name);
-  const photo = url || stock;
+  const photo = photoUrl(url) || stock;
   if (photo) {
     return (
       <img src={photo} alt="" width={s} height={s} loading="lazy" draggable={false}

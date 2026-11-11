@@ -256,7 +256,6 @@ function RecentActivity() {
   const q = useQuery({
     queryKey: ['notifications', 'dashboard'],
     queryFn: () => api.get<any>('/notifications', { limit: 5 }),
-    refetchInterval: 60_000,
   });
   const items: any[] = (q.data as any)?.data || [];
   return (
@@ -301,7 +300,6 @@ function UpcomingSchedule({ home }: { home: any }) {
     queryKey: ['ai-meetings', 'dashboard'],
     queryFn: () => api.get<any>('/ai-meetings/dashboard').then((r) => r.data),
     enabled: can('meetings', 'view'),
-    refetchInterval: 60_000,
   });
   const live = meetings.data?.live || [];
   const upcoming = meetings.data?.upcoming || [];

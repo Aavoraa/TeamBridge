@@ -155,3 +155,43 @@ describe('requesting a task for yourself', () => {
     assert.equal(res.status, 422);
   });
 });
+
+describe('the approver edits a request before approving it', () => {
+  test('the task goes on their list as edited, and the request remembers what changed', async () => {
+    const asked = await ask(emp, { title: 'Write launch checklist', description: 'draft', priority: 'low' });
+    assert.equal(asked.status, 201, JSON.stringify(asked.body));
+    const id = asked.body.data.id;
+    const res = await api.post(`/task-requests/${id}/approve`, {
+      title: 'Write the launch checklist for Sunrise Foods',
+      description: 'Cover payments, SEO and analytics.',
+      priority: 'high',
+    }, { token: mgr.token });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    const item = res.body.data.action_item;
+    assert.equal(item.title, 'Write the launch checklist for Sunrise Foods');
+    assert.equal(item.description, 'Cover payments, SEO and analytics.');
+    assert.equal(item.priority, 'high');
+    assert.equal(item.owner_id, emp.user.id, 'still their task');
+    assert.deepEqual(Object.keys(res.body.data.approved_changes).sort(), ['description', 'priority', 'title']);
+    assert.equal(res.body.data.approved_changes.title.from, 'Write launch checklist');
+
+    const mine = (await api.get('/task-requests?box=mine&status=all', { token: emp.token })).body.data.find((r) => r.id === id);
+    assert.equal(mine.title, 'Write the launch checklist for Sunrise Foods');
+    assert.ok(mine.approved_changes.priority);
+  });
+
+  test('approving as asked records no changes', async () => {
+    const asked = await ask(emp, { title: 'Book the venue' });
+    const res = await api.post(`/task-requests/${asked.body.data.id}/approve`, {}, { token: mgr.token });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(res.body.data.approved_changes, null);
+  });
+
+  test('an edit cannot blank the task', async () => {
+    const asked = await ask(emp, { title: 'Send the brief' });
+    const res = await api.post(`/task-requests/${asked.body.data.id}/approve`, { title: ' ' }, { token: mgr.token });
+    assert.equal(res.status, 422);
+    const still = (await api.get('/task-requests?box=mine&status=all', { token: emp.token })).body.data.find((r) => r.id === asked.body.data.id);
+    assert.equal(still.status, 'pending');
+  });
+});

@@ -3,7 +3,7 @@ import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   House, SquareCheckBig, Users2, FileText, Receipt, Wallet, BookOpenCheck, BarChart3, Settings, Bell, Menu, X, LogOut,
-  Sun, Moon, Search, ShieldCheck, ChevronDown, CreditCard, Clock, AlertTriangle, Target, CheckCircle2, FolderKanban,
+  Search, ShieldCheck, ChevronDown, CreditCard, Clock, AlertTriangle, Target, CheckCircle2, FolderKanban,
   Megaphone, MessagesSquare, Contact, FileSpreadsheet, History, Send, Landmark, ClipboardList, Sparkles, AudioLines,
   Video, CalendarPlus, LogIn, CalendarClock, CalendarDays, ListChecks, Building2, UserRound, ArrowRight, MessageSquare,
   SquareUser, Presentation, LayoutDashboard,
@@ -20,24 +20,18 @@ import { relative } from '../lib/format';
 import TodoReminders from './TodoReminders';
 
 /* ------------------------------------------------------------------ theme */
-/** Exported so the mobile shell shares it — two copies would let the native
- *  status bar drift out of step with the page. */
+/**
+ * TeamBridge is light only. This undoes a dark choice saved by an older
+ * version, and keeps the native status bar light to match. Exported so the
+ * mobile shell applies the same thing.
+ */
 export function useTheme() {
-  const [dark, setDark] = useState(() => {
-    const saved = store.get('phoenixx.theme');
-    if (saved) return saved === 'dark';
-    return window.matchMedia('(prefers-color-scheme: dark)').matches;
-  });
-
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', dark);
-    store.set('phoenixx.theme', dark ? 'dark' : 'light');
-    // The native status bar sits outside the WebView, so it has to be told
-    // separately or it keeps the old theme's text colour and goes unreadable.
-    void applyStatusBarTheme(dark);
-  }, [dark]);
-
-  return { dark, toggle: () => setDark((d) => !d) };
+    document.documentElement.classList.remove('dark');
+    store.set('phoenixx.theme', 'light');
+    void applyStatusBarTheme(false);
+  }, []);
+  return { dark: false };
 }
 
 /* ------------------------------------------------------------ navigation */
@@ -150,7 +144,7 @@ function activeOf(items: NavItem[], pathname: string, search: string) {
 /* =================================================================== SHELL */
 export default function Layout() {
   const { signOut } = useAuth();
-  const { dark, toggle } = useTheme();
+  useTheme();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   usePushMessages();
 
@@ -160,7 +154,7 @@ export default function Layout() {
 
       {/* ------------------------------------------------------------- main */}
       <div className="flex-1 min-w-0 flex flex-col">
-        <TopBar onMenu={() => setSidebarOpen(true)} dark={dark} toggleTheme={toggle} signOut={signOut} />
+        <TopBar onMenu={() => setSidebarOpen(true)} signOut={signOut} />
         <main className="flex-1 min-w-0 px-4 pt-3 pb-10 sm:px-8 max-w-[1600px] w-full mx-auto">
           <PushBanner />
           <Outlet />
@@ -199,8 +193,6 @@ export function Sidebar({ open: drawerOpen, onClose, drawerOnly }: {
   const { data: home } = useQuery({
     queryKey: ['home-counters'],
     queryFn: () => api.get('/dashboard/home').then((r) => r.data),
-    refetchInterval: 120_000,
-    staleTime: 60_000,
   });
 
   // Claim queues are their own call: the roles that can see them are a
@@ -209,8 +201,6 @@ export function Sidebar({ open: drawerOpen, onClose, drawerOnly }: {
     queryKey: ['reimbursements', 'queues'],
     queryFn: () => api.get('/finance/reimbursements/queues').then((r) => r.data),
     enabled: can('reimbursements', 'view'),
-    refetchInterval: 180_000,
-    staleTime: 120_000,
   });
 
   const counters = home?.counters || {};
@@ -428,8 +418,8 @@ function MenuButton({ children, onClick, danger }: { children: React.ReactNode; 
 }
 
 /* ================================================================= TOPBAR */
-function TopBar({ onMenu, dark, toggleTheme, signOut }: {
-  onMenu: () => void; dark: boolean; toggleTheme: () => void; signOut: () => void;
+function TopBar({ onMenu, signOut }: {
+  onMenu: () => void; signOut: () => void;
 }) {
   const { user, tenant, can } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -458,11 +448,6 @@ function TopBar({ onMenu, dark, toggleTheme, signOut }: {
         <VoiceTaskButton />
 
         <NotificationBell open={bellOpen} setOpen={setBellOpen} />
-
-        <button onClick={toggleTheme} aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'} title={dark ? 'Light mode' : 'Dark mode'}
-          className="grid h-10 w-10 place-items-center rounded-full text-ink hover:bg-sunken transition-colors duration-150 cursor-pointer">
-          {dark ? <Moon size={21} strokeWidth={1.8} /> : <Sun size={22} strokeWidth={1.8} />}
-        </button>
 
         <div className="relative" ref={menuRef}>
           <button onClick={() => setMenuOpen((o) => !o)}
@@ -593,7 +578,6 @@ function NotificationBell({ open, setOpen }: { open: boolean; setOpen: (v: boole
   const { data } = useQuery({
     queryKey: ['notifications', 'bell'],
     queryFn: () => api.get('/notifications', { limit: 12 }),
-    refetchInterval: 60_000,
   });
 
   useEffect(() => {

@@ -6,11 +6,11 @@
  */
 import { ReactNode, createContext, useCallback, useContext, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronRight, Globe, LogOut, Menu, Moon, Settings, Sun } from 'lucide-react';
+import { ChevronRight, Globe, LogOut, Menu, Settings } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { isNative } from '../lib/storage';
 import { Sidebar, useTheme } from '../components/Layout';
-import { useStockPhoto, avatarTint } from '../lib/avatar';
+import { useStockPhoto, avatarTint, photoUrl } from '../lib/avatar';
 import { Sheet } from './sheet';
 
 type Chrome = { openProfile: () => void; openNav: () => void };
@@ -19,6 +19,7 @@ const ChromeContext = createContext<Chrome>({ openProfile: () => {}, openNav: ()
 export const useChrome = () => useContext(ChromeContext);
 
 export function MobileChrome({ children }: { children: ReactNode }) {
+  useTheme(); // light only, status bar included
   const [profile, setProfile] = useState(false);
   const [nav, setNav] = useState(false);
 
@@ -50,7 +51,7 @@ export function ProfileButton() {
       className="h-10 w-10 shrink-0 overflow-hidden rounded-full active:scale-95 transition-transform duration-100"
     >
       {user?.avatar_url
-        ? <img src={user.avatar_url} alt="" className="h-full w-full object-cover" />
+        ? <img src={photoUrl(user.avatar_url) || undefined} alt="" className="h-full w-full object-cover" />
         : (
           <span className="block h-full w-full" style={{ background: avatarTint(name) }}>
             <Drawn name={name} />
@@ -78,7 +79,6 @@ export function MenuButton() {
 
 function ProfileSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { user, tenant, subscription, signOut } = useAuth();
-  const { dark, toggle } = useTheme();
   const navigate = useNavigate();
   const name = user?.name || '?';
 
@@ -92,7 +92,7 @@ function ProfileSheet({ open, onClose }: { open: boolean; onClose: () => void })
           style={{ background: avatarTint(name) }}
         >
           {user?.avatar_url
-            ? <img src={user.avatar_url} alt="" className="h-full w-full object-cover" />
+            ? <img src={photoUrl(user.avatar_url) || undefined} alt="" className="h-full w-full object-cover" />
             : <Drawn name={name} />}
         </span>
         <div className="min-w-0">
@@ -106,12 +106,6 @@ function ProfileSheet({ open, onClose }: { open: boolean; onClose: () => void })
       </div>
 
       <div className="card divide-y divide-[var(--border)] overflow-hidden">
-        <button type="button" onClick={toggle}
-          className="flex w-full min-h-[52px] items-center gap-3 px-3.5 py-3 text-left active:bg-sunken">
-          {dark ? <Sun size={18} className="text-subtle" /> : <Moon size={18} className="text-subtle" />}
-          <span className="flex-1 text-[15px] text-ink">{dark ? 'Light mode' : 'Dark mode'}</span>
-        </button>
-
         <button type="button" onClick={() => go('/profile')}
           className="flex w-full min-h-[52px] items-center gap-3 px-3.5 py-3 text-left active:bg-sunken">
           <Settings size={18} className="text-subtle" />

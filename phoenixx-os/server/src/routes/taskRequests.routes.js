@@ -34,7 +34,9 @@ const requestSchema = z.object({
 });
 
 const decisionSchema = z.object({
-  /** The approver may settle the details while approving. */
+  /** The approver may edit the request before approving it: wording, priority and timing. */
+  title: z.string().trim().min(2, 'Say what the task is').max(240).optional(),
+  description: z.string().max(8000).optional().nullable(),
   priority: z.enum(PRIORITIES).optional(),
   due_date: dateish,
   due_time: timeish,
@@ -58,7 +60,10 @@ async function hydrate(tenantId, rows) {
   const name = Object.fromEntries(people.map((p) => [p.id, p.name]));
   return rows.map((r) => {
     const approverIds = parseJson(r.approver_ids, []);
-    return { ...r, approver_ids: approverIds, approvers: approverIds.map((id) => ({ id, name: name[id] || 'Former member' })) };
+    return {
+      ...r, approver_ids: approverIds, approvers: approverIds.map((id) => ({ id, name: name[id] || 'Former member' })),
+      approved_changes: r.approved_changes ? parseJson(r.approved_changes, null) : null,
+    };
   });
 }
 
@@ -203,30 +208,51 @@ taskRequestsRouter.post('/:id/approve', requires('action_items', 'view'), async 
   if (!claimed.changes) throw conflict('Someone has already decided this request');
 
   const dueDate = body.due_date !== undefined ? (body.due_date || null) : request.due_date;
-  const dueTime = body.due_time !== undefined ? (body.due_time || null) : request.due_time;
+  const dueTime = dueDate ? (body.due_time !== undefined ? (body.due_time || null) : request.due_time) : null;
+  // What actually goes on their list, after any edits by the approver.
+  const final = {
+    title: body.title ?? request.title,
+    description: body.description !== undefined ? (body.description?.trim() || null) : (request.description || null),
+    priority: body.priority || request.priority,
+    due_date: dueDate || null,
+    due_time: dueTime || null,
+  };
+  const changes = Object.fromEntries(Object.entries(final)
+    .filter(([k, v]) => (v ?? null) !== (request[k] ?? null))
+    .map(([k, v]) => [k, { from: request[k] ?? null, to: v }]));
+  const edited = Object.keys(changes).length > 0;
   let item;
   try {
     const task = validateTaskBody({
-      title: request.title,
-      description: request.description || null,
+      title: final.title,
+      description: final.description,
       owner_id: request.requester_id,
       project_id: request.project_id || null,
-      priority: body.priority || request.priority,
-      due_date: dueDate || '',
-      due_time: dueDate ? (dueTime || '') : '',
+      priority: final.priority,
+      due_date: final.due_date || '',
+      due_time: final.due_date ? (final.due_time || '') : '',
     });
     task.source_type = 'task_request';
     task.source_id = request.id;
     item = await createActionItem(req, task, {
-      notify: { eventKey: 'task_request.approved', vars: { person: req.auth.name } },
+      notify: { eventKey: 'task_request.approved', vars: { person: req.auth.name, changes: edited ? ' with some changes' : '' } },
     });
   } catch (e) {
     await run("UPDATE task_requests SET status = 'pending', decided_by = NULL, decided_at = NULL, decision_note = NULL WHERE id = ?",
       [request.id]);
     throw e;
   }
-  await run('UPDATE task_requests SET action_item_id = ? WHERE id = ?', [item.id, request.id]);
-  await audit(req, { entity: 'task_request', entityId: request.id, action: 'approve', after: { action_item_id: item.id } });
+  // The request now reads as approved; what it said before is kept in approved_changes.
+  await run(
+    `UPDATE task_requests SET action_item_id = ?, title = ?, description = ?, priority = ?, due_date = ?, due_time = ?,
+       approved_changes = ? WHERE id = ?`,
+    [item.id, final.title, final.description, final.priority, final.due_date, final.due_time,
+      edited ? JSON.stringify(changes) : null, request.id],
+  );
+  await audit(req, {
+    entity: 'task_request', entityId: request.id, action: 'approve',
+    after: { action_item_id: item.id, ...(edited ? { changes } : {}) },
+  });
 
   const [row] = await hydrate(tenantId, [await get(`${SELECT} WHERE r.id = ?`, [request.id])]);
   return ok(res, { ...row, action_item: item });

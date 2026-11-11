@@ -67,8 +67,6 @@ export default function TodoReminders() {
   const { data } = useQuery({
     queryKey: TODOS_KEY,
     queryFn: () => api.get('/todos', { date: today() }).then((r) => ({ items: r.data as Todo[], meta: r.meta })),
-    refetchInterval: 60_000,
-    staleTime: 30_000,
   });
   const pending = useMemo(() => (data?.items || []).filter((t) => t.status === 'pending'), [data]);
 

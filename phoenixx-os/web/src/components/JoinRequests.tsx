@@ -21,7 +21,6 @@ export const usePendingJoinCount = (enabled: boolean) => useQuery({
   queryKey: ['join-requests', 'pending'],
   queryFn: () => api.get('/team-join/requests', { status: 'pending' }),
   enabled,
-  refetchInterval: 60_000,
   select: (r: any) => Number(r.meta?.pending || 0),
 });
 

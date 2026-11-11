@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, Inbox, Send, Undo2, X } from 'lucide-react';
+import { Check, Inbox, PencilLine, Send, Undo2, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { clockTime, date as fmtDate, relative, workspaceToday } from '../lib/format';
@@ -211,6 +211,7 @@ const PRIORITY_TONE: Record<string, any> = { urgent: 'negative', high: 'warning'
 function ReviewCard({ request: r, onReject }: { request: any; onReject: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
+  const [editing, setEditing] = useState(false);
   const approve = useMutation({
     mutationFn: () => api.post<any>(`/task-requests/${r.id}/approve`, {}),
     onSuccess: () => {
@@ -239,12 +240,91 @@ function ReviewCard({ request: r, onReject }: { request: any; onReject: () => vo
         <div className="flex w-full gap-2 sm:w-auto sm:flex-col">
           <Button variant="primary" icon={<Check size={15} />} loading={approve.isPending} onClick={() => approve.mutate()}
             className="flex-1 sm:flex-none">Approve</Button>
+          <Button icon={<PencilLine size={15} />} onClick={() => setEditing(true)} disabled={approve.isPending}
+            className="flex-1 sm:flex-none">Edit &amp; approve</Button>
           <Button icon={<X size={15} />} onClick={onReject} disabled={approve.isPending} className="flex-1 sm:flex-none">Reject</Button>
         </div>
       </div>
+      {editing && <EditApproveModal request={r} onClose={() => setEditing(false)} />}
     </Card>
   );
 }
+
+/**
+ * The approver rewords or re-times the request, then approves it as edited.
+ * The task lands on the requester's list as shown here; the request keeps a
+ * note of what was changed, and the requester is told it was approved with changes.
+ */
+function EditApproveModal({ request: r, onClose }: { request: any; onClose: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [form, setForm] = useState({
+    title: r.title || '', description: r.description || '', priority: r.priority || 'medium',
+    due_date: r.due_date || '', due_time: r.due_time || '',
+  });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const set = (k: string, v: string) => { setForm((f) => ({ ...f, [k]: v })); setErrors((e) => ({ ...e, [k]: '' })); };
+  const pastDate = !!form.due_date && form.due_date < workspaceToday() && form.due_date !== r.due_date;
+
+  const approve = useMutation({
+    mutationFn: () => api.post<any>(`/task-requests/${r.id}/approve`, {
+      title: form.title.trim(),
+      description: form.description.trim() || null,
+      priority: form.priority,
+      due_date: form.due_date || '',
+      due_time: form.due_date ? (form.due_time || '') : '',
+    }),
+    onSuccess: (res: any) => {
+      const changed = !!res.data?.approved_changes;
+      toast.success(`Approved${changed ? ' with your changes' : ''}. "${form.title.trim()}" is now on ${r.requester_name}'s tasks.`);
+      invalidate(qc);
+      onClose();
+    },
+    onError: (e: any) => { setErrors(e.fieldErrors || {}); toast.error(e.message); invalidate(qc); },
+  });
+
+  return (
+    <Modal open onClose={onClose} title="Edit and approve"
+      subtitle={`${r.requester_name} asked for this. Change anything that needs it, then approve.`}
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" icon={<Check size={15} />} loading={approve.isPending}
+            disabled={form.title.trim().length < 2 || pastDate} onClick={() => approve.mutate()}>
+            Approve
+          </Button>
+        </>
+      }>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Task" required error={errors.title} className="sm:col-span-2">
+          <Input value={form.title} onChange={(e) => set('title', e.target.value)} maxLength={240} autoFocus />
+        </Field>
+        <Field label="Details" className="sm:col-span-2" error={errors.description}>
+          <Textarea rows={4} value={form.description} onChange={(e) => set('description', e.target.value)}
+            placeholder="What done looks like" />
+        </Field>
+        <Field label="Priority">
+          <Select value={form.priority} onChange={(e) => set('priority', e.target.value)}>
+            {PRIORITIES.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+          </Select>
+        </Field>
+        <Field label="Project" hint="Stays as asked">
+          <Input value={r.project_name || 'Not for a project'} disabled />
+        </Field>
+        <Field label="Due date" error={errors.due_date || (pastDate ? 'Pick today or a later day' : undefined)}>
+          <Input type="date" value={form.due_date} min={workspaceToday()} onChange={(e) => set('due_date', e.target.value)} />
+        </Field>
+        <Field label="Time" hint={form.due_date ? 'Optional' : 'Set a date first'} error={errors.due_time}>
+          <Input type="time" value={form.due_time} disabled={!form.due_date} onChange={(e) => set('due_time', e.target.value)} />
+        </Field>
+      </div>
+    </Modal>
+  );
+}
+
+const CHANGE_LABEL: Record<string, string> = {
+  title: 'task', description: 'details', priority: 'priority', due_date: 'due date', due_time: 'time',
+};
 
 const STATUS_UI: Record<string, { label: string; tone: any }> = {
   pending: { label: 'Waiting for approval', tone: 'warning' },
@@ -275,7 +355,10 @@ function MineRow({ request: r }: { request: any }) {
         </p>
         <p className={cx('mt-1 text-[12.5px]', r.status === 'rejected' ? 'text-[var(--negative)]' : 'text-muted')}>
           {r.status === 'pending' && `With ${orList(r.approvers.map((a: any) => a.name))}`}
-          {r.status === 'approved' && `Approved by ${r.decided_by_name} ${relative(r.decided_at)}`}
+          {r.status === 'approved' && (r.approved_changes
+            ? `Approved by ${r.decided_by_name} ${relative(r.decided_at)}, who changed the ${
+              Object.keys(r.approved_changes).map((k) => CHANGE_LABEL[k] || k).join(', ')}`
+            : `Approved by ${r.decided_by_name} ${relative(r.decided_at)}`)}
           {r.status === 'rejected' && `${r.decided_by_name}: ${r.decision_note}`}
         </p>
       </div>

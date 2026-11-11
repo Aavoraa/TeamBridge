@@ -104,7 +104,6 @@ export default function Reimbursements() {
   const { data: queues } = useQuery({
     queryKey: ['reimbursements', 'queues'],
     queryFn: () => api.get(`${BASE}/queues`).then((r) => r.data),
-    refetchInterval: 120_000,
   });
 
   const tabs = [

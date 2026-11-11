@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowDownToLine, CalendarDays, CheckCircle2, ListTodo, Pencil, Plus, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
@@ -37,6 +37,15 @@ export default function PersonalTodos({ className }: { className?: string }) {
   const qc = useQueryClient();
   const toast = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
+  // "Add a to-do" elsewhere lands here with ?todo=1: bring the box into view, ready to type.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('todo') !== '1') return;
+    const t = setTimeout(() => {
+      inputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      inputRef.current?.focus();
+    }, 300);
+    return () => clearTimeout(t);
+  }, []);
 
   const [title, setTitle] = useState('');
   const [time, setTime] = useState('');

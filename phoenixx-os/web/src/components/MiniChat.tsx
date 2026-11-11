@@ -35,7 +35,6 @@ export default function MiniChat({ className }: { className?: string } = {}) {
   const { data: channels, isLoading } = useQuery({
     queryKey: ['chat', 'channels'],
     queryFn: () => api.get('/chat/channels').then((r) => r.data),
-    refetchInterval: 60_000,
   });
 
   /* Unread first, then the company channel: the panel opens on what matters. */

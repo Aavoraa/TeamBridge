@@ -7,13 +7,16 @@ import { AuthProvider } from './lib/auth';
 import { ToastProvider } from './components/ui';
 import { hydrate } from './lib/storage';
 import { initNative, tagPlatform } from './lib/native';
+import { applyRefreshSchedule } from './lib/refresh';
 import './index.css';
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 30_000,
-      refetchOnWindowFocus: false,
+      // Coming back to the tab or the app refreshes anything older than its schedule (lib/refresh).
+      refetchOnWindowFocus: true,
+      refetchOnReconnect: true,
       retry: (failureCount, error: any) => {
         // Auth and permission failures are answers, not transient faults.
         if ([401, 403, 404, 422].includes(error?.status)) return false;
@@ -22,6 +25,7 @@ const queryClient = new QueryClient({
     },
   },
 });
+applyRefreshSchedule(queryClient);
 
 /**
  * On a device the saved session lives in native storage, which can only be read

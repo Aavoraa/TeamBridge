@@ -3,6 +3,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { ShieldCheck, KeyRound, Smartphone, Monitor, Check, LogOut, ShieldQuestion } from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { ProfilePhoto } from '../components/ProfilePhoto';
 import { dateTime, relative, titleCase } from '../lib/format';
 import {
   SecurityQuestionFields, EMPTY_SECURITY_QUESTION, isSecurityQuestionComplete,
@@ -52,13 +53,7 @@ export default function Profile() {
         <Card>
           <CardHeader title="Details" />
           <div className="p-4 space-y-4">
-            <div className="flex items-center gap-3">
-              <Avatar name={user?.name} url={user?.avatar_url} size={52} />
-              <div>
-                <p className="text-[15px] font-semibold text-ink">{user?.name}</p>
-                <p className="text-[13px] text-subtle">{user?.designation || titleCase(user?.role)}</p>
-              </div>
-            </div>
+            <ProfilePhoto />
 
             <Field label="Name">
               <Input value={name} onChange={(e) => setName(e.target.value)} />

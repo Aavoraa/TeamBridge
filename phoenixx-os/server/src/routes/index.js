@@ -39,6 +39,7 @@ import { liveMeetingsRouter } from './liveMeetings.routes.js';
 import { livekitConfigured, webhooks, applyWebhook } from '../services/livekit.js';
 import { openapi } from '../openapi.js';
 import { runDueJobs } from '../services/jobs.js';
+import { avatarPublicRouter, avatarRouter } from './avatars.routes.js';
 
 const api = Router();
 
@@ -109,6 +110,8 @@ api.use('/auth', authRouter);
 api.use('/public/proposals', rateLimit({ max: 120 }), publicProposalRouter);
 // Personal invitation links: the invitee creates their own account; the owner approves it.
 api.use('/public/join', rateLimit({ max: 30, windowMs: 15 * 60_000 }), publicJoinRouter);
+// Profile photos: shown by plain <img> tags, so read without sign-in (see avatars.routes).
+api.use('/avatars', avatarPublicRouter);
 
 // ---------------------------------------------------------------- protected
 api.use(authenticate);
@@ -117,6 +120,7 @@ api.use(rateLimit());
 api.use('/action-items', actionItemsRouter);
 // Employees ask to take a task on themselves; their manager or project lead approves it.
 api.use('/task-requests', taskRequestsRouter);
+api.use('/me/avatar', avatarRouter);
 // My Day's personal list. No RBAC module: every row is pinned to the caller.
 api.use('/todos', todosRouter);
 api.use('/todo-plan', todoPlanRouter);

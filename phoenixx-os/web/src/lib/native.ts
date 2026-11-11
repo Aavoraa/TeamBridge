@@ -47,7 +47,7 @@ export async function initNative(): Promise<void> {
   // The web layout already handles the notch via env(safe-area-inset-*), so the
   // page is allowed to draw under the status bar.
   try { await StatusBar.setOverlaysWebView({ overlay: false }); } catch { /* iOS-only paths */ }
-  await applyStatusBarTheme(store.get('phoenixx.theme') === 'dark');
+  await applyStatusBarTheme(false);
 
   // Resizing the WebView (rather than the body) keeps sticky headers and
   // bottom bars where they belong when the keyboard opens.

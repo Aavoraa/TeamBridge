@@ -54,7 +54,7 @@ export default function MeetingRoom() {
   // The room is always dark, so the installed app's status bar icons must be light while here.
   useEffect(() => {
     void applyStatusBarTheme(true);
-    return () => { void applyStatusBarTheme(store.get('phoenixx.theme') === 'dark'); };
+    return () => { void applyStatusBarTheme(false); };
   }, []);
 
   const q = useQuery({ queryKey: ['ai-meetings', 'meeting', id], queryFn: () => api.get<any>(`/ai-meetings/${id}`).then((r) => r.data) });

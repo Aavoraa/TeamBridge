@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Clock, AlertTriangle, PhoneCall, CalendarDays, CheckCircle2, LogIn, LogOut,
-  ListChecks, ArrowUpRight, Bell, Stamp, Plus, PencilLine, Users2, CalendarOff,
+  ListChecks, ArrowUpRight, Bell, Stamp, Plus, PencilLine, Users2, CalendarOff, Send,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -16,6 +16,7 @@ import {
 } from '../components/ui';
 import MiniChat from '../components/MiniChat';
 import PersonalTodos from '../components/PersonalTodos';
+import { assignsWork } from '../components/TaskRequests';
 import { TodoPlanSection } from '../components/TomorrowTodo';
 import { announceCheckIn } from '../components/TodoReminders';
 import { DailyUpdateModal } from '../components/DailyUpdate';
@@ -106,9 +107,14 @@ export default function Home() {
         subtitle={`${greeting}, ${data?.greeting_name || user?.name?.split(' ')[0]} · ${date(new Date().toISOString(), 'long')}`}
         actions={
           <>
-            {can('action_items', 'create') && (
+            {assignsWork(user?.role) ? (can('action_items', 'create') && (
               <Button variant="primary" icon={<Plus size={15} />} onClick={() => navigate('/action-items?new=1')}>
                 Quick add
+              </Button>
+            )) : (
+              // Employees keep their own work as to-dos and ask for tasks; they do not create them.
+              <Button variant="primary" icon={<Send size={15} />} onClick={() => navigate('/action-items?request=1')}>
+                Request a task
               </Button>
             )}
             {!keepsAttendance ? null : offToday ? (

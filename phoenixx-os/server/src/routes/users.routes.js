@@ -8,12 +8,26 @@ import {
   requires, can, MODULES, ACTIONS, normaliseAccess, roleAccess, permissionMatrix, invalidatePersonAccess,
 } from '../middleware/rbac.js';
 import { notifyMany } from '../services/notifications.js';
+import { assignableIds } from '../services/taskAssignment.js';
 import { config } from '../config.js';
 import { emailConfigured, inviteEmail, sendMail } from '../services/mailer.js';
 
 const router = Router();
 
 const ROLES = ['owner', 'manager', 'employee', 'finance', 'hr', 'client'];
+
+/**
+ * Whose details a caller may see on the Team pages. The owner, HR and finance
+ * see everyone; a manager sees themselves, the people who report to them and
+ * the people on projects they run; anyone else only themselves. (The plain name
+ * list behind chat and pickers is /users/directory and stays open to all.)
+ * Returns null for "everyone".
+ */
+async function visibleIds(auth) {
+  if (['owner', 'super_admin', 'hr', 'finance'].includes(auth.role)) return null;
+  if (auth.role === 'manager') return [auth.userId, ...(await assignableIds(auth) || [])];
+  return [auth.userId];
+}
 
 /**
  * Who may reset whose password. Passwords are stored one-way, so nobody can
@@ -88,6 +102,8 @@ router.get('/', requires('employees', 'view'), async (req, res) => {
   if (req.query.manager_id) { filters.push('u.manager_id = ?'); params.push(req.query.manager_id); }
   if (req.query.service_line_id) { filters.push('u.service_line_id = ?'); params.push(req.query.service_line_id); }
   if (req.query.search) { filters.push('(u.name LIKE ? OR u.email LIKE ? OR u.designation LIKE ?)'); const t = `%${req.query.search}%`; params.push(t, t, t); }
+  const visible = await visibleIds(req.auth);
+  if (visible) { filters.push(`u.id IN (${visible.map(() => '?').join(',')})`); params.push(...visible); }
 
   const where = filters.join(' AND ');
   const total = Number((await get(`SELECT COUNT(*) AS n FROM users u WHERE ${where}`, params))?.n || 0);
@@ -114,6 +130,8 @@ router.get('/invite/email-status', requires('users', 'create'), async (req, res)
 }));
 
 router.get('/:id', requires('employees', 'view'), async (req, res) => {
+  const visible = await visibleIds(req.auth);
+  if (visible && !visible.includes(req.params.id)) throw notFound('User');
   const user = await get(`${SELECT} WHERE u.id = ? AND u.tenant_id = ? AND u.deleted_at IS NULL`,
     [req.params.id, req.auth.tenantId]);
   if (!user) throw notFound('User');
@@ -508,7 +526,11 @@ router.get('/org/chart', requires('employees', 'view'), async (req, res) => {
     byManager.get(key).push(u);
   }
   const build = (id) => (byManager.get(id) || []).map((u) => ({ ...u, reports: build(u.id) }));
-  return ok(res, build('__root__'));
+  const visible = await visibleIds(req.auth);
+  if (!visible) return ok(res, build('__root__'));
+  // A manager sees their own branch: themselves and everyone under them.
+  const me = users.find((u) => u.id === req.auth.userId);
+  return ok(res, me ? [{ ...me, reports: build(me.id) }] : []);
 });
 
 export { router as usersRouter };

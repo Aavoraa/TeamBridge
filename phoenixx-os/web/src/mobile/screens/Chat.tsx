@@ -9,6 +9,7 @@
  * from the same /chat/channels call; `kind` is what separates them.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { refreshMs } from '../../lib/refresh';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Megaphone, MessagesSquare, Search, Send, Users } from 'lucide-react';
@@ -36,7 +37,7 @@ function ChannelList() {
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: CHANNELS_KEY,
     queryFn: () => api.get('/chat/channels').then((r) => r.data),
-    refetchInterval: 20_000,
+    refetchInterval: refreshMs('live'),
   });
 
   const channels = useMemo(() => {
@@ -184,7 +185,7 @@ function Thread({ channelId }: { channelId: string }) {
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: messagesKey,
     queryFn: () => api.get(`/chat/channels/${channelId}/messages`, { limit: 40 }).then((r) => r.data),
-    refetchInterval: 8_000,
+    refetchInterval: refreshMs('live'),
   });
 
   // Marking read on open is what clears the tab badge; the list is refetched so

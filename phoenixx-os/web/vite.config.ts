@@ -16,5 +16,5 @@ export default defineConfig({
       '/api': { target: process.env.VITE_API_URL || 'http://localhost:4010', changeOrigin: true },
     },
   },
-  build: { outDir: 'dist', sourcemap: false, chunkSizeWarningLimit: 900 },
+  build: { outDir: 'dist', sourcemap: false, chunkSizeWarningLimit: 1200 },
 });

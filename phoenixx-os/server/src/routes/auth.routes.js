@@ -206,11 +206,13 @@ router.patch('/me', authenticate, async (req, res) => {
     name: z.string().min(1).optional(),
     phone: z.string().optional(),
     whatsapp: z.string().optional(),
-    avatar_url: z.string().optional(),
+    // Set a photo through POST /me/avatar; here it can only be cleared, never pointed elsewhere.
+    avatar_url: z.union([z.literal(''), z.null()]).optional(),
     notification_prefs: z.record(z.string(), z.any()).optional(),
   });
   const body = validate(schema, req.body);
   const fields = { ...body, updated_at: nowIso() };
+  if ('avatar_url' in fields) fields.avatar_url = null;
   if (body.notification_prefs) fields.notification_prefs = JSON.stringify(body.notification_prefs);
 
   const cols = Object.keys(fields);

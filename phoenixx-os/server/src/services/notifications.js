@@ -198,7 +198,7 @@ export const DEFAULT_TEMPLATES = {
   },
   'task_request.approved': {
     subject: 'Task approved: {{title}}',
-    body: 'Hi {{user.name}}, {{person}} has approved your task request "{{title}}". It is now on your task list.',
+    body: 'Hi {{user.name}}, {{person}} has approved your task request "{{title}}"{{changes}}. It is now on your task list.',
   },
   'task_request.rejected': {
     subject: 'Task request not approved: {{title}}',

@@ -237,6 +237,8 @@ const ADDED_COLUMNS = [
   ['users', 'recovery_locked_until', 'TEXT'],
   // Areas the owner opened to this one person on top of their role (Team > person).
   ['users', 'extra_access', 'TEXT'],
+  // What the approver changed before approving a task request: {field: {from, to}}.
+  ['task_requests', 'approved_changes', 'TEXT'],
   // Single-use, short-lived, stored as a SHA-256 digest like refresh tokens.
   ['users', 'recovery_token', 'TEXT'],
   ['users', 'recovery_token_expires_at', 'TEXT'],

@@ -38,7 +38,6 @@ export default function Chat() {
     queryKey: ['chat', 'channels'],
     queryFn: () => api.get('/chat/channels').then((r) => r.data),
     // A backstop for a stream that never connected; the SSE feed does the work.
-    refetchInterval: 60_000,
   });
 
   const activeId = params.get('channel') || channels?.[0]?.id || null;

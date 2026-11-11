@@ -1,5 +1,9 @@
 import { useEffect, useReducer } from 'react';
 import { avatarColor } from './format';
+import { API_ORIGIN } from './config';
+
+/** A stored profile photo's address, made absolute where the page is not served by the API (the phone app). */
+export const photoUrl = (url?: string | null) => (url && url.startsWith('/api/') ? `${API_ORIGIN}${url}` : url || null);
 
 /**
  * Stock photos for people who have not uploaded their own.

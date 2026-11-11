@@ -81,7 +81,8 @@ export const ROLE_TEMPLATES = {
     hr_leave: RW,
     hr_performance: RO,
     hr_hiring: [],
-    employees: RO,
+    // Colleagues' details are not an employee's business: no Team pages, no profiles.
+    employees: [],
     sop: RO,
     kpi: RO,
     // Clients, pipeline, proposals and projects are not an employee's by

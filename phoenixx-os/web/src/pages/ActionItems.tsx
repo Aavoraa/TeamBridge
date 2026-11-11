@@ -5,6 +5,7 @@ import {
   Plus, Filter, Download, ArrowUpRight, X, MessageSquare, Paperclip, Repeat,
   CheckCircle2, ListChecks, LayoutGrid, List, AlertTriangle, Trash2, Users2, User,
   ClipboardList, CircleAlert, PencilLine, Clock, ShieldCheck, Undo2, History, Mic, Square, Volume2,
+  ListTodo, Send,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { parseVoiceTask, useSpeech, voiceAssistantSupported, type VoiceParse } from '../lib/voiceTask';
@@ -21,6 +22,17 @@ import {
   EmptyState, ErrorState, Field, Input, Modal, PageHeader, SearchInput, Select, StatusBadge,
   Table, TableSkeleton, TD, TH, THead, TR, Textarea, useToast, cx, Tabs, Meter,
 } from '../components/ui';
+
+/** Columns of the task list: select, task, assignee, due, status. */
+const TASK_GRID = 'grid items-center gap-x-4 grid-cols-[20px_minmax(0,1fr)_96px] sm:grid-cols-[20px_minmax(0,1fr)_130px_96px] md:grid-cols-[20px_minmax(0,1fr)_190px_130px_104px]';
+
+/** Priority as a dot on every row; only high and urgent also say so in words. */
+const PRIORITY_STYLE: Record<string, { color: string; label?: string }> = {
+  urgent: { color: 'var(--negative)', label: 'Urgent' },
+  high: { color: 'var(--warning)', label: 'High' },
+  medium: { color: 'var(--brand-vivid, var(--brand))' },
+  low: { color: 'var(--ink-subtle)' },
+};
 
 const STATUSES = ['open', 'in_progress', 'blocked', 'done', 'cancelled'];
 const PRIORITIES = ['urgent', 'high', 'medium', 'low'];
@@ -174,7 +186,7 @@ export default function ActionItems() {
   // themselves, which their manager or project lead approves.
   const assigns = assignsWork(user?.role);
   const requestsWaiting = useTaskRequestCount();
-  const [requestOpen, setRequestOpen] = useState(false);
+  const [requestOpen, setRequestOpen] = useState(params.get('request') === '1' && !assignsWork(user?.role));
 
   const [view, setView] = useState<'list' | 'board'>('list');
   const [search, setSearch] = useState('');
@@ -325,15 +337,18 @@ export default function ActionItems() {
                 Export
               </Button>
             )}
-            {can('action_items', 'create') && (assigns ? (
+            {assigns ? (can('action_items', 'create') && (
               <Button variant="primary" icon={<Plus size={15} />} onClick={() => setCreateOpen(true)}>
                 New item
               </Button>
-            ) : (
-              <Button variant="primary" icon={<Plus size={15} />} onClick={() => setRequestOpen(true)}>
-                Request a task
-              </Button>
-            ))}
+            )) : (
+              <>
+                <Link to="/?todo=1"><Button icon={<ListTodo size={15} />}>Add a to-do</Button></Link>
+                <Button variant="primary" icon={<Send size={15} />} onClick={() => setRequestOpen(true)}>
+                  Request a task
+                </Button>
+              </>
+            )}
           </>
         )}
       />
@@ -426,102 +441,121 @@ export default function ActionItems() {
         : isLoading ? <Card><TableSkeleton /></Card>
           : items.length === 0 ? (
             <Card>
-              <EmptyState icon={<ListChecks size={20} />} title="No action items match"
-                message={activeFilterCount || search ? 'Try loosening the filters.' : 'Create the first item to start tracking work.'}
-                action={can('action_items', 'create')
+              <EmptyState icon={<ListChecks size={20} />}
+                title={activeFilterCount || search ? 'No action items match' : assigns ? 'No action items yet' : 'No tasks for you yet'}
+                message={activeFilterCount || search ? 'Try loosening the filters.'
+                  : assigns ? 'Create the first item to start tracking work.'
+                    : 'Tasks your manager gives you show up here. Keep your own work as private to-dos, or ask for a task.'}
+                action={activeFilterCount || search ? undefined : assigns ? (can('action_items', 'create')
                   ? <Button variant="primary" icon={<Plus size={15} />} onClick={() => setCreateOpen(true)}>New item</Button>
-                  : undefined} />
+                  : undefined) : (
+                  <div className="flex flex-wrap justify-center gap-2">
+                    <Link to="/?todo=1"><Button icon={<ListTodo size={15} />}>Add a to-do</Button></Link>
+                    <Button variant="primary" icon={<Send size={15} />} onClick={() => setRequestOpen(true)}>Request a task</Button>
+                  </div>
+                )} />
             </Card>
           ) : view === 'board' ? (
             <BoardView items={items} onOpen={setOpenId} />
           ) : (
-            <Card>
-              <Table>
-                <THead>
-                  <tr>
-                    <TH width="36px">
-                      <Checkbox label="" checked={selected.length === items.length && items.length > 0}
-                        onChange={(v) => setSelected(v ? items.map((i: any) => i.id) : [])} />
-                    </TH>
-                    <TH>Item</TH>
-                    <TH width="160px">Assigned to</TH>
-                    <TH width="120px">Created by</TH>
-                    <TH width="140px">Client</TH>
-                    <TH width="118px">Due</TH>
-                    <TH width="110px">Priority</TH>
-                    <TH width="120px">Status</TH>
-                  </tr>
-                </THead>
-                <tbody>
-                  {items.map((item: any) => {
-                    const overdue = isOverdue(item);
-                    return (
-                      <TR key={item.id}>
-                        <TD>
-                          <span onClick={(e) => e.stopPropagation()}>
-                            <Checkbox label="" checked={selected.includes(item.id)}
-                              onChange={(v) => setSelected((s) => v ? [...s, item.id] : s.filter((x) => x !== item.id))} />
-                          </span>
-                        </TD>
-                        <TD>
-                          <button onClick={() => setOpenId(item.id)}
-                            className="text-left group cursor-pointer w-full">
-                            <span className="block font-medium text-ink group-hover:text-[var(--brand)] transition-colors leading-snug">
-                              {item.title}
-                            </span>
-                            <span className="mt-0.5 flex items-center gap-2.5 text-[12px] text-subtle">
-                              {item.category_name && (
-                                <span className="inline-flex items-center gap-1">
-                                  <span className="h-1.5 w-1.5 rounded-full" style={{ background: item.category_color }} aria-hidden />
-                                  {item.category_name}
-                                </span>
-                              )}
-                              {item.comment_count > 0 && <span className="inline-flex items-center gap-1"><MessageSquare size={11} />{item.comment_count}</span>}
-                              {item.attachment_count > 0 && <span className="inline-flex items-center gap-1"><Paperclip size={11} />{item.attachment_count}</span>}
-                              {item.recurrence && item.recurrence !== 'none' && <span className="inline-flex items-center gap-1"><Repeat size={11} />{item.recurrence}</span>}
-                              {item.escalation_level > 0 && (
-                                <span className="inline-flex items-center gap-1 text-[var(--negative)] font-medium">
-                                  <ArrowUpRight size={11} />L{item.escalation_level}
-                                </span>
-                              )}
-                              {item.validation_status === 'changes_requested' && (
-                                <span className="inline-flex items-center gap-1 text-[var(--warning)] font-medium">
-                                  <Undo2 size={11} />sent back
-                                  {item.rework_count > 1 && ` ·  ${item.rework_count}×`}
-                                </span>
-                              )}
-                            </span>
+            <Card className="overflow-hidden">
+              {/* A quiet list: the task and its context on the left, who / when / where on the right. */}
+              <div className={cx(TASK_GRID, 'border-b border-line bg-sunken/60 px-4 py-2 text-[11px] font-medium uppercase tracking-[0.06em] text-subtle')}>
+                <span onClick={(e) => e.stopPropagation()}>
+                  <Checkbox label="" checked={selected.length === items.length && items.length > 0}
+                    onChange={(v) => setSelected(v ? items.map((i: any) => i.id) : [])} />
+                </span>
+                <span>Task</span>
+                <span className="hidden md:block">Assignee</span>
+                <span className="hidden sm:block">Due</span>
+                <span className="text-right">Status</span>
+              </div>
+              <ul className="divide-y divide-[var(--border)]">
+                {items.map((item: any) => {
+                  const overdue = isOverdue(item);
+                  const prio = PRIORITY_STYLE[item.priority] || PRIORITY_STYLE.low;
+                  const meta = [
+                    item.client_name,
+                    item.created_by_name && item.created_by_name !== item.owner_name ? `from ${item.created_by_name}` : null,
+                  ].filter(Boolean);
+                  return (
+                    <li key={item.id}
+                      className={cx(TASK_GRID, 'group relative cursor-pointer px-4 py-3 transition-colors hover:bg-sunken/70',
+                        selected.includes(item.id) && 'bg-brand-soft/40')}
+                      onClick={() => setOpenId(item.id)}>
+                      <span onClick={(e) => e.stopPropagation()}>
+                        <Checkbox label="" checked={selected.includes(item.id)}
+                          onChange={(v) => setSelected((s) => v ? [...s, item.id] : s.filter((x) => x !== item.id))} />
+                      </span>
+
+                      <div className="min-w-0">
+                        <div className="flex items-start sm:items-center gap-2">
+                          <span className="mt-[7px] sm:mt-0 h-2 w-2 shrink-0 rounded-full" style={{ background: prio.color }}
+                            title={`${item.priority} priority`} aria-label={`${item.priority} priority`} />
+                          <button type="button" onClick={(e) => { e.stopPropagation(); setOpenId(item.id); }}
+                            className="min-w-0 line-clamp-2 sm:line-clamp-none sm:truncate text-left leading-snug text-[14px] font-medium text-ink group-hover:text-[var(--brand)] transition-colors cursor-pointer">
+                            {item.title}
                           </button>
-                        </TD>
-                        <TD>
-                          {item.owner_name ? (
-                            <span className="flex items-center gap-1.5">
-                              <AvatarWithName name={item.owner_name} url={item.owner_avatar} size={24}
-                                sub={item.extra_assignee_count > 0
-                                  ? `+${item.extra_assignee_count} more` : item.owner_designation} />
+                          {prio.label && (
+                            <span className="shrink-0 rounded px-1.5 py-px text-[10.5px] font-semibold uppercase tracking-wide"
+                              style={{ color: prio.color, background: `color-mix(in srgb, ${prio.color} 12%, transparent)` }}>
+                              {prio.label}
                             </span>
-                          ) : <span className="text-subtle">Unassigned</span>}
-                        </TD>
-                        <TD><span className="text-muted truncate block max-w-[110px]">
-                          {item.created_by_name || '—'}
-                        </span></TD>
-                        <TD><span className="text-muted truncate block max-w-[140px]">{item.client_name || '—'}</span></TD>
-                        <TD>
-                          <span className={cx('text-[13px]', overdue ? 'text-[var(--negative)] font-medium' : 'text-muted')}
-                            title={dueFull(item)}>
-                            {dueLabel(item)}
+                          )}
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 pl-4 text-[12px] text-subtle">
+                          {item.category_name && (
+                            <span className="inline-flex items-center gap-1">
+                              <span className="h-1.5 w-1.5 rounded-full" style={{ background: item.category_color }} aria-hidden />
+                              {item.category_name}
+                            </span>
+                          )}
+                          {meta.map((m) => <span key={m} className="truncate max-w-[220px]">{m}</span>)}
+                          {item.comment_count > 0 && <span className="inline-flex items-center gap-1"><MessageSquare size={11} />{item.comment_count}</span>}
+                          {item.attachment_count > 0 && <span className="inline-flex items-center gap-1"><Paperclip size={11} />{item.attachment_count}</span>}
+                          {item.recurrence && item.recurrence !== 'none' && <span className="inline-flex items-center gap-1"><Repeat size={11} />{item.recurrence}</span>}
+                          {item.escalation_level > 0 && (
+                            <span className="inline-flex items-center gap-1 text-[var(--negative)] font-medium">
+                              <ArrowUpRight size={11} />Escalated L{item.escalation_level}
+                            </span>
+                          )}
+                          {item.validation_status === 'changes_requested' && (
+                            <span className="inline-flex items-center gap-1 text-[var(--warning)] font-medium">
+                              <Undo2 size={11} />Sent back{item.rework_count > 1 && ` ${item.rework_count}×`}
+                            </span>
+                          )}
+                          {/* On small screens the due date rides along here. */}
+                          <span className={cx('sm:hidden inline-flex items-center gap-1', overdue && 'text-[var(--negative)] font-medium')}>
+                            <Clock size={11} />{dueLabel(item)}
                           </span>
-                        </TD>
-                        <TD>
-                          <Badge tone={item.priority === 'urgent' ? 'negative' : item.priority === 'high' ? 'warning'
-                            : item.priority === 'medium' ? 'brand' : 'neutral'}>{item.priority}</Badge>
-                        </TD>
-                        <TD><StatusBadge status={item.status} /></TD>
-                      </TR>
-                    );
-                  })}
-                </tbody>
-              </Table>
+                        </div>
+                      </div>
+
+                      <div className="hidden md:flex min-w-0 items-center gap-2">
+                        {item.owner_name ? (
+                          <>
+                            <Avatar name={item.owner_name} url={item.owner_avatar} size={26} />
+                            <div className="min-w-0 leading-tight">
+                              <p className="truncate text-[13px] text-ink">{item.owner_name}</p>
+                              <p className="truncate text-[11.5px] text-subtle">
+                                {item.extra_assignee_count > 0 ? `+${item.extra_assignee_count} more` : item.owner_designation || ''}
+                              </p>
+                            </div>
+                          </>
+                        ) : <span className="text-[13px] text-subtle">Unassigned</span>}
+                      </div>
+
+                      <span className={cx('hidden sm:inline-flex items-center gap-1.5 text-[13px] tabular',
+                        overdue ? 'text-[var(--negative)] font-medium' : 'text-muted')} title={dueFull(item)}>
+                        {overdue ? <AlertTriangle size={13} /> : <Clock size={13} className="text-subtle" />}
+                        {dueLabel(item)}
+                      </span>
+
+                      <span className="flex justify-end"><StatusBadge status={item.status} /></span>
+                    </li>
+                  );
+                })}
+              </ul>
 
               {pageMeta.pages > 1 && (
                 <div className="flex items-center justify-between gap-3 border-t border-line px-4 py-2.5">

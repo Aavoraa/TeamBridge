@@ -67,7 +67,6 @@ function Dashboard() {
   const q = useQuery({
     queryKey: ['ai-meetings', 'dashboard'],
     queryFn: () => api.get<any>('/ai-meetings/dashboard').then((r) => r.data),
-    refetchInterval: 60_000,
   });
   const canCreate = can('meetings', 'create');
   const d = q.data;

@@ -59,7 +59,7 @@ test('a manager resets only the people who report to them', async () => {
   assert.equal((await reset(ownerId, mAuth)).status, 403);
   const view = await api.get(`/users/${report.id}`, mAuth);
   assert.equal(view.body.data.can_reset_password, true);
-  assert.equal((await api.get(`/users/${stranger.id}`, mAuth)).body.data.can_reset_password, false);
+  assert.equal((await api.get(`/users/${stranger.id}`, mAuth)).status, 404, 'outside their team, not even visible');
 });
 
 test('employees reset nobody, and nobody resets their own password here', async () => {
