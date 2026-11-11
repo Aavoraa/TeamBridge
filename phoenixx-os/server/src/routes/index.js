@@ -22,6 +22,8 @@ import { financeRouter } from './finance.routes.js';
 import { todosRouter } from './todos.routes.js';
 import { todoPlanRouter } from './todoPlan.routes.js';
 import { projectsRouter } from './projects.routes.js';
+import { resourcesRouter } from './resources.routes.js';
+import { ApiError } from '../lib/http.js';
 import { projectUpdatesRouter } from './projectUpdates.routes.js';
 import { marketingRouter } from './marketing.routes.js';
 import { reportsRouter } from './reports.routes.js';
@@ -156,6 +158,9 @@ api.use('/calendar', calendarRouter);
 api.use('/billing', billingRouter);
 api.use('/sync', syncRouter);
 api.use('/files', fileRouter);
+// Client and project documents. Staff only: a client portal login never reaches it.
+api.use('/resources', (req, _res, next) => next(req.auth?.role === 'client'
+  ? new ApiError(403, 'forbidden', 'Not available to client logins') : undefined), resourcesRouter);
 
 // S9 - platform console
 api.use('/admin', requireSuperAdmin, adminRouter);

@@ -2235,3 +2235,46 @@ CREATE TABLE IF NOT EXISTS task_requests (
 );
 CREATE INDEX IF NOT EXISTS ix_taskreq_requester ON task_requests(tenant_id, requester_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS ix_taskreq_status ON task_requests(tenant_id, status, created_at DESC);
+
+-- AI company profile of a client, read from its website (services/companyProfile.js).
+-- One per client; changing the website re-queues it. The two-page PDF is in stored_files.
+CREATE TABLE IF NOT EXISTS client_website_profiles (
+  client_account_id TEXT PRIMARY KEY REFERENCES client_accounts(id),
+  tenant_id TEXT NOT NULL REFERENCES tenants(id),
+  website TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued',    -- queued|analyzing|ready|failed
+  error TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  lease_until TEXT,
+  profile TEXT,                             -- JSON from the AI
+  pdf_path TEXT,
+  model TEXT,
+  requested_by TEXT REFERENCES users(id),
+  generated_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_cwp_status ON client_website_profiles(status, updated_at);
+
+-- Documents kept for a client or a project (routes/resources.routes.js): one of
+-- client_account_id / project_id is set. Bytes are in stored_files under
+-- resources/<tenant>/, served only through the resources routes.
+CREATE TABLE IF NOT EXISTS resources (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id),
+  client_account_id TEXT REFERENCES client_accounts(id),
+  project_id TEXT REFERENCES projects(id),
+  title TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'other',  -- contract|brief|brand|design|report|invoice|other
+  notes TEXT,
+  filename TEXT NOT NULL,
+  mime TEXT,
+  size_bytes INTEGER NOT NULL DEFAULT 0,
+  storage_path TEXT NOT NULL,
+  uploaded_by TEXT REFERENCES users(id),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_resources_client ON resources(tenant_id, client_account_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS ix_resources_project ON resources(tenant_id, project_id, created_at DESC);

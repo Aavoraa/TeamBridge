@@ -38,13 +38,29 @@ export async function uploadAttachment(entity: string, entityId: string, file: F
   });
 }
 
-/** Opens the file in a new tab (the system viewer on a device). */
-async function viewFile(att: any) {
-  const res = await request<Response>(att.url.replace('/api/v1', ''), { raw: true });
+/** Types a browser can show without running anything the file contains. */
+export const SAFE_VIEW = /^(application\/pdf|image\/(png|jpe?g|gif|webp)|text\/(plain|csv))$/i;
+
+/**
+ * Fetches a file with the auth header and opens it in a new tab (the system
+ * viewer on a device). An HTML or SVG file would run as this app if opened
+ * here, so anything outside SAFE_VIEW is saved instead of shown.
+ */
+export async function openFile(path: string, filename: string, mime?: string | null) {
+  const res = await request<Response>(path, { raw: true });
   if (!res.ok) throw new ApiError(res.status, 'view_failed', 'Could not open that file');
   const blob = await res.blob();
-  if (await saveAndOpen(blob, att.filename)) return;
-  const url = URL.createObjectURL(new Blob([blob], { type: att.mime || blob.type }));
+  if (await saveAndOpen(blob, filename)) return;
+  const type = mime || blob.type;
+  if (!SAFE_VIEW.test(type)) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    return;
+  }
+  const url = URL.createObjectURL(new Blob([blob], { type }));
   window.open(url, '_blank', 'noopener');
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
@@ -125,7 +141,7 @@ export function AttachmentList({ entity, entityId, canUpload = false, canRemove 
                     </span>
                   </span>
                   <span className="flex shrink-0 items-center gap-1">
-                    <Button size="sm" variant="ghost" icon={<Eye size={14} />} onClick={() => run(viewFile(f))}>View</Button>
+                    <Button size="sm" variant="ghost" icon={<Eye size={14} />} onClick={() => run(openFile(f.url.replace('/api/v1', ''), f.filename, f.mime))}>View</Button>
                     {asPdf ? (
                       <Button size="sm" variant="ghost" icon={<FileDown size={14} />}
                         onClick={() => run(api.download(`/files/${f.id}/pdf`, pdfName(f.filename)))}>PDF</Button>

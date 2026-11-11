@@ -3,10 +3,12 @@ import { z } from 'zod';
 import { get, all, run, repo } from '../db/index.js';
 import { uuid, nowIso, parseJson, toCsv } from '../lib/util.js';
 import {
-  ok, created, validate, notFound, conflict, audit, paginate, pageMeta, sortClause,
+  ok, created, validate, notFound, conflict, badRequest, audit, paginate, pageMeta, sortClause,
 } from '../lib/http.js';
 import { requires } from '../middleware/rbac.js';
 import { ensureDeliveryRecord } from '../services/clientAccounts.js';
+import { normalizeWebsite, requestProfile, profileView } from '../services/companyProfile.js';
+import { sendStoredFile } from '../services/storage.js';
 
 /**
  * The client master - the register behind the Clients page.
@@ -73,6 +75,18 @@ const hydrate = (row) => (row ? { ...row, tags: parseJson(row.tags, []) } : row)
 
 /** Empty strings arrive from HTML inputs; store them as NULL, not ''. */
 const nullify = (v) => (v === '' || v === undefined ? null : v);
+
+/** A website, when given, must be a public web address; stored with its https://. */
+function checkWebsite(body) {
+  if (body.website === undefined || body.website === null || String(body.website).trim() === '') return;
+  const url = normalizeWebsite(body.website);
+  if (!url) throw badRequest('That website address does not look right', [{ field: 'website', message: 'Enter a web address like example.com' }]);
+  body.website = url;
+}
+
+const profileRow = (tenantId, id) => get(
+  'SELECT * FROM client_website_profiles WHERE client_account_id = ? AND tenant_id = ?', [id, tenantId],
+);
 
 /**
  * Same company on the books twice is the failure mode this register exists to
@@ -178,12 +192,13 @@ router.get('/:id', requires('crm', 'view'), async (req, res) => {
     [req.params.id, req.auth.tenantId],
   );
 
-  return ok(res, { ...hydrate(row), leads });
+  return ok(res, { ...hydrate(row), leads, company_profile: profileView(await profileRow(req.auth.tenantId, row.id)) });
 });
 
 // ----------------------------------------------------------------- create
 router.post('/', requires('crm', 'create'), async (req, res) => {
   const body = validate(accountSchema, req.body);
+  checkWebsite(body);
   const { tenantId, userId } = req.auth;
 
   if (req.query.force !== 'true') {
@@ -218,6 +233,8 @@ router.post('/', requires('crm', 'create'), async (req, res) => {
   // invoice — those all read the pipeline table.
   await ensureDeliveryRecord(tenantId, userId, await get('SELECT * FROM client_accounts WHERE id = ?', [id]));
 
+  if (body.website) await requestProfile({ tenantId, clientAccountId: id, website: body.website, userId });
+
   await audit(req, { entity: 'client_account', entityId: id, action: 'create', after: { name: body.name } });
   return created(res, hydrate(await get(`${SELECT} WHERE a.id = ?`, [id])));
 });
@@ -230,6 +247,7 @@ router.patch('/:id', requires('crm', 'edit'), async (req, res) => {
   if (!before) throw notFound('Client');
 
   const body = validate(accountSchema.partial(), req.body);
+  checkWebsite(body);
 
   if (body.name && req.query.force !== 'true') {
     const dup = await findDuplicate(tenantId, { ...before, ...body }, before.id);
@@ -260,8 +278,45 @@ router.patch('/:id', requires('crm', 'edit'), async (req, res) => {
       [after.name, nowIso(), deliveryId, tenantId]);
   }
 
+  // A new or changed website gets a fresh company profile; a cleared one drops it.
+  if (body.website !== undefined && (nullify(body.website) || null) !== (before.website || null)) {
+    await requestProfile({ tenantId, clientAccountId: before.id, website: body.website, userId: req.auth.userId });
+  }
+
   await audit(req, { entity: 'client_account', entityId: before.id, action: 'update', before, after: patch });
   return ok(res, hydrate(await get(`${SELECT} WHERE a.id = ?`, [before.id])));
+});
+
+// ---------------------------------------------------------- company profile
+/** Status of the AI company profile, for the page to poll while it is made. */
+router.get('/:id/profile', requires('crm', 'view'), async (req, res) => {
+  const account = await get('SELECT id FROM client_accounts WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL',
+    [req.params.id, req.auth.tenantId]);
+  if (!account) throw notFound('Client');
+  return ok(res, profileView(await profileRow(req.auth.tenantId, account.id)));
+});
+
+/** Make it again from the current website. */
+router.post('/:id/profile', requires('crm', 'edit'), async (req, res) => {
+  const account = await get('SELECT id, website FROM client_accounts WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL',
+    [req.params.id, req.auth.tenantId]);
+  if (!account) throw notFound('Client');
+  if (!normalizeWebsite(account.website)) throw badRequest('Add the website for this client first');
+  await requestProfile({ tenantId: req.auth.tenantId, clientAccountId: account.id, website: account.website, userId: req.auth.userId });
+  await audit(req, { entity: 'client_account', entityId: account.id, action: 'profile_regenerate' });
+  return ok(res, profileView(await profileRow(req.auth.tenantId, account.id)));
+});
+
+/** The two-page PDF. */
+router.get('/:id/profile.pdf', requires('crm', 'view'), async (req, res) => {
+  const account = await get('SELECT id, name FROM client_accounts WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL',
+    [req.params.id, req.auth.tenantId]);
+  if (!account) throw notFound('Client');
+  const row = await profileRow(req.auth.tenantId, account.id);
+  if (!row?.pdf_path) throw notFound('Company profile');
+  const filename = `${account.name.replace(/[^\w.\- ]/g, '').trim() || 'client'} - company profile.pdf`;
+  const disposition = req.query.download === '1' ? 'attachment' : 'inline';
+  if (!(await sendStoredFile(res, row.pdf_path, { filename, disposition }))) throw notFound('Company profile');
 });
 
 // ----------------------------------------------------------------- archive

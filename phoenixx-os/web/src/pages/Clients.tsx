@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  Building2, Download, Globe, Mail, Pencil, Phone, Plus, Trash2, Users2, X,
+  Building2, Download, Eye, FileText, Globe, Loader2, Mail, Pencil, Phone, Plus, RefreshCw, Sparkles, Trash2, Users2, X,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -11,6 +11,7 @@ import {
   Modal, PageHeader, SearchInput, Select, Table, TableSkeleton, TD, TH, THead, TR,
   Textarea, useToast,
 } from '../components/ui';
+import { ResourceLibrary } from '../components/Resources';
 
 /**
  * The client register — every company on file, independent of whether there is
@@ -318,7 +319,10 @@ function ClientForm({ account, directory, onClose, onSaved }: {
         : api.post(`/clients${qs}`, body);
     },
     onSuccess: () => {
-      toast.success(account ? `${form.name} updated.` : `${form.name} added to your clients.`);
+      const site = String(form.website || '').trim();
+      const siteChanged = !!site && site !== (account?.website || '');
+      toast.success(`${account ? `${form.name} updated.` : `${form.name} added to your clients.`}${
+        siteChanged ? ' AI is reading the website to prepare the company profile.' : ''}`);
       onSaved();
     },
     onError: (e: any) => {
@@ -406,7 +410,7 @@ function ClientForm({ account, directory, onClose, onSaved }: {
               <Input value={form.whatsapp} onChange={(e) => set('whatsapp', e.target.value)}
                 placeholder="+91 98765 43210" />
             </Field>
-            <Field label="Website">
+            <Field label="Website" hint="Optional. AI reads the site and prepares a 2-page company profile">
               <Input value={form.website} onChange={(e) => set('website', e.target.value)}
                 placeholder="https://cottonindia.com" />
             </Field>
@@ -501,6 +505,8 @@ function ClientDetailModal({ account, onClose, onEdit }: {
           )}
         </div>
 
+        <CompanyProfile accountId={account.id} name={a.name} website={a.website} />
+
         <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
           <DetailRow label="Legal name" value={a.legal_name} />
           <DetailRow label="Primary contact"
@@ -521,6 +527,11 @@ function ClientDetailModal({ account, onClose, onEdit }: {
             <p className="whitespace-pre-wrap text-[13.5px] leading-relaxed text-muted">{a.notes}</p>
           </div>
         )}
+
+        <div>
+          <p className="label-cap mb-2">Documents</p>
+          <ResourceLibrary clientAccountId={account.id} embedded />
+        </div>
 
         <div>
           <p className="label-cap mb-2">Pipeline activity</p>
@@ -550,6 +561,79 @@ function ClientDetailModal({ account, onClose, onEdit }: {
         </div>
       </div>
     </Modal>
+  );
+}
+
+/** The AI company profile made from the client's website, with its 2-page PDF. */
+function CompanyProfile({ accountId, name, website }: { accountId: string; name: string; website?: string | null }) {
+  const { can } = useAuth();
+  const toast = useToast();
+  const qc = useQueryClient();
+  const { data: p } = useQuery({
+    queryKey: ['client-profile', accountId],
+    queryFn: () => api.get<any>(`/clients/${accountId}/profile`).then((r) => r.data),
+    // Poll while the AI is working.
+    refetchInterval: (q: any) => (['queued', 'analyzing'].includes(q.state.data?.status) ? 4000 : false),
+  });
+  const regenerate = useMutation({
+    mutationFn: () => api.post(`/clients/${accountId}/profile`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['client-profile', accountId] }),
+    onError: (e: any) => toast.error(e.message),
+  });
+  const run = (promise: Promise<any>) => promise.catch((e: any) => toast.error(e.message));
+  const pdfPath = `/clients/${accountId}/profile.pdf`;
+  const fileName = `${name} - company profile.pdf`;
+
+  if (!website && !p) return null;
+  const domain = (p?.website || website || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+  const working = !p || ['queued', 'analyzing'].includes(p.status);
+
+  return (
+    <div className="rounded-lg border border-line bg-sunken p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="flex items-center gap-2 text-[13.5px] font-semibold text-ink">
+          <Sparkles size={15} className="text-[var(--brand)]" />Company profile
+          {p?.status === 'ready' && <Badge tone="positive">Ready</Badge>}
+          {p?.status === 'failed' && <Badge tone="negative">Could not finish</Badge>}
+        </p>
+        {p?.status === 'ready' && (
+          <span className="flex flex-wrap gap-1.5">
+            <Button size="sm" icon={<Eye size={14} />} onClick={() => run(api.openPdf(pdfPath))}>View PDF</Button>
+            <Button size="sm" icon={<Download size={14} />}
+              onClick={() => run(api.download(pdfPath, fileName, { download: 1 }))}>Download</Button>
+          </span>
+        )}
+      </div>
+
+      {!p && website && (
+        <p className="mt-2 text-[13px] text-subtle">No profile yet for {domain}.</p>
+      )}
+      {p && working && (
+        <p className="mt-2 flex items-center gap-2 text-[13px] text-muted">
+          <Loader2 size={14} className="animate-spin" />
+          AI is reading {domain} and writing a 2-page profile. This usually takes a minute or two.
+        </p>
+      )}
+      {p?.status === 'failed' && (
+        <p className="mt-2 text-[13px] text-[var(--negative)]">{p.error || 'The profile could not be made.'}</p>
+      )}
+      {p?.status === 'ready' && p.profile && (
+        <div className="mt-2 space-y-1.5">
+          {p.profile.tagline && <p className="text-[13px] font-medium text-ink">{p.profile.tagline}</p>}
+          <p className="line-clamp-4 text-[13px] leading-relaxed text-muted">{p.profile.overview}</p>
+          <p className="flex items-center gap-1.5 text-[12px] text-subtle">
+            <FileText size={12} />2 pages · from {domain}{p.generated_at ? ` · ${new Date(p.generated_at).toLocaleDateString()}` : ''}
+          </p>
+        </div>
+      )}
+
+      {can('crm', 'edit') && website && (!p || p.status === 'ready' || p.status === 'failed') && (
+        <Button size="sm" variant="ghost" className="mt-2" icon={<RefreshCw size={14} />} loading={regenerate.isPending}
+          onClick={() => regenerate.mutate()}>
+          {!p ? 'Create profile' : p.status === 'failed' ? 'Try again' : 'Refresh from website'}
+        </Button>
+      )}
+    </div>
   );
 }
 

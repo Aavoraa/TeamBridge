@@ -22,6 +22,7 @@ import { pruneChatEvents } from './chat.js';
 import { processPendingMeetings } from './meetingIntel.js';
 import { sendMeetingReminders } from './liveMeetings.js';
 import { sweepCaptures } from './meetingCapture.js';
+import { processPendingProfiles } from './companyProfile.js';
 
 /**
  * In-process job runner.
@@ -647,6 +648,8 @@ const JOBS = [
   { key: 'meetings.reminders', everyMin: 5, fn: sendMeetingReminders },
   // Recordings whose webhook never arrived; transcripts that are ready to queue.
   { key: 'meetings.capture', everyMin: 5, fn: sweepCaptures },
+  // Client company profiles from their website that are queued or stuck.
+  { key: 'clients.profiles', everyMin: 1, fn: processPendingProfiles },
 ];
 
 /**
@@ -732,5 +735,6 @@ export const JOB_REGISTRY = {
   'todo.tick': todoClock,
   'chat.prune': pruneChatEvents,
   'meetings.process': processPendingMeetings,
+  'clients.profiles': processPendingProfiles,
   'meetings.reminders': sendMeetingReminders,
 };

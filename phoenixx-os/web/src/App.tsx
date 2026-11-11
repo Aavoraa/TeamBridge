@@ -28,6 +28,7 @@ const Clients = lazy(() => import('./pages/Clients'));
 const ClientDetail = lazy(() => import('./pages/ClientDetail'));
 const Proposals = lazy(() => import('./pages/Proposals'));
 const Projects = lazy(() => import('./pages/Projects'));
+const Resources = lazy(() => import('./pages/Resources'));
 const Marketing = lazy(() => import('./pages/Marketing'));
 const Invoices = lazy(() => import('./pages/Invoices'));
 const InvoiceDetail = lazy(() => import('./pages/InvoiceDetail'));
@@ -130,6 +131,7 @@ export default function App() {
         <Route path="proposals" element={<NeedAccess module="proposals"><Suspense fallback={<FullPageSpinner />}><Proposals /></Suspense></NeedAccess>} />
         <Route path="projects" element={<NeedAccess module="projects"><Suspense fallback={<FullPageSpinner />}><Projects /></Suspense></NeedAccess>} />
         <Route path="projects/:id" element={<NeedAccess module="projects"><Suspense fallback={<FullPageSpinner />}><Projects /></Suspense></NeedAccess>} />
+        <Route path="resources" element={<Suspense fallback={<FullPageSpinner />}><Resources /></Suspense>} />
         <Route path="marketing" element={<NeedAccess module="crm" marketingTeam><Suspense fallback={<FullPageSpinner />}><Marketing /></Suspense></NeedAccess>} />
         <Route path="marketing/:projectId" element={<NeedAccess module="crm" marketingTeam><Suspense fallback={<FullPageSpinner />}><Marketing /></Suspense></NeedAccess>} />
         <Route path="proposals/:id" element={<NeedAccess module="proposals"><Suspense fallback={<FullPageSpinner />}><Proposals /></Suspense></NeedAccess>} />

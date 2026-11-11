@@ -16,6 +16,7 @@ import {
 import {
   EditOwnersModal, OwnerChecklist, OWNER_ROLES, ProjectUpdateHistory, ProjectUpdateModal, ProjectUpdatesTab,
 } from '../components/ProjectUpdates';
+import { ResourceLibrary } from '../components/Resources';
 
 /**
  * Module F - projects and the people delivering them.
@@ -701,6 +702,7 @@ function ProjectDrawer({ id, onClose }: { id: string; onClose: () => void }) {
             { id: 'team', label: 'Team' },
             { id: 'updates', label: 'Daily updates' },
             { id: 'details', label: 'Project details' },
+            { id: 'documents', label: 'Documents' },
             ...(can('meetings', 'view') ? [{ id: 'meetings', label: 'Meetings' }] : []),
           ]} />
         </div>
@@ -708,6 +710,7 @@ function ProjectDrawer({ id, onClose }: { id: string; onClose: () => void }) {
         {tab === 'team' ? <TeamTab project={p} editable={editable} onAdd={() => setAddOpen(true)} />
           : tab === 'updates' ? <ProjectUpdateHistory projectId={p.id} />
             : tab === 'meetings' ? <ProjectMeetings projectId={p.id} canCreate={can('meetings', 'create')} />
+            : tab === 'documents' ? <div className="p-5"><ResourceLibrary projectId={p.id} embedded /></div>
               : <DetailsTab project={p} editable={editable} />}
       </Drawer>
 

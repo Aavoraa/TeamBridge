@@ -6,7 +6,7 @@ import {
   Search, ShieldCheck, ChevronDown, CreditCard, Clock, AlertTriangle, Target, CheckCircle2, FolderKanban,
   Megaphone, MessagesSquare, Contact, FileSpreadsheet, History, Send, Landmark, ClipboardList, Sparkles, AudioLines,
   Video, CalendarPlus, LogIn, CalendarClock, CalendarDays, ListChecks, Building2, UserRound, ArrowRight, MessageSquare,
-  SquareUser, Presentation, LayoutDashboard,
+  SquareUser, Presentation, LayoutDashboard, FolderOpen,
 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { PushBanner, PushToggle, usePushMessages } from './PushControls';
@@ -56,6 +56,8 @@ type NavItem = {
 /** The CRM section is drawn for these roles only. The API still allows other
  *  roles their CRM permissions (client pickers in invoices, tasks, meetings). */
 const CRM_ROLES = ['owner', 'manager', 'super_admin'];
+/** Everyone but a client portal login. */
+const STAFF_ROLES = ['owner', 'super_admin', 'manager', 'employee', 'finance', 'hr'];
 /** A top-level entry: a page of its own, or a section that opens to show its pages. */
 type NavGroup = { label: string; icon: any } & ({ item: NavItem; children?: never } | { item?: never; children: NavItem[] });
 
@@ -68,6 +70,7 @@ const NAV: NavGroup[] = [
   { label: 'Dashboard', icon: House, item: { to: '/', label: 'Dashboard', exact: true } },
   { label: 'Calendar', icon: CalendarDays, item: { to: '/calendar', label: 'Office calendar' } },
   { label: 'Projects', icon: FolderKanban, item: { to: '/projects', label: 'Projects', module: 'projects' } },
+  { label: 'Resources', icon: FolderOpen, item: { to: '/resources', label: 'Resources', roles: STAFF_ROLES } },
   {
     label: 'Tasks', icon: SquareCheckBig, children: [
       { to: '/action-items', label: 'Action items', icon: ListChecks, module: 'action_items', badge: 'overdue' },

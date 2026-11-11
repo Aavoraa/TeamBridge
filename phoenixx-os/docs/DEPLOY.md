@@ -54,7 +54,7 @@ DATABASE_URL="postgres://..." npm run seed
 | `CRON_SECRET` | 32+ random characters; protects the background-jobs endpoint |
 | `WEB_BASE_URL` | Optional until a custom domain is attached; defaults to the project's production `*.vercel.app` address. Invite and proposal links are built from it |
 | `API_BASE_URL` | Same value as `WEB_BASE_URL` |
-| `ANTHROPIC_API_KEY` | Optional. AI reading of commands in the AI Task Assistant (falls back to the built-in parser), and required for AI Meeting Intelligence analysis |
+| `ANTHROPIC_API_KEY` | Optional. AI reading of commands in the AI Task Assistant (falls back to the built-in parser), required for AI Meeting Intelligence analysis, and for the AI company profile made from a client's website (`COMPANY_PROFILE_MODEL` overrides the model) |
 | `OPENAI_API_KEY` | Optional. Speech-to-text for meeting recordings in AI Meeting Intelligence; without it only transcript files can be uploaded |
 | `GEMINI_API_KEY`, `TRANSCRIBE_PROVIDER=gemini` | Optional. Google Gemini for speech-to-text instead of OpenAI. Use a billing-enabled key: free-tier data may be used by Google |
 | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | Optional. Live video for AI Meetings (LiveKit Cloud project → Settings → Keys). Without them meetings can be scheduled but not joined |
