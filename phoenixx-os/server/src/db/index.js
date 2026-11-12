@@ -315,6 +315,8 @@ const ADDED_COLUMNS = [
   ['tenants', 'marketing_settings', 'TEXT'],
   // Tomorrow's To-Do schedule (times, working days, toggles); NULL means the defaults.
   ['tenants', 'todo_settings', 'TEXT'],
+  // HR's own colours for the attendance register: { present: '#16a34a', ... }.
+  ['tenants', 'attendance_colors', 'TEXT'],
   // A planned task ticked off on the day, like a card marked complete.
   ['todo_tasks', 'done_at', 'TEXT'],
   ['todo_tasks', 'done_by', 'TEXT'],

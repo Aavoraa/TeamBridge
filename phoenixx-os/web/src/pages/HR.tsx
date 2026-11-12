@@ -6,7 +6,7 @@ import {
 } from 'recharts';
 import {
   Plus, LogIn, LogOut, CalendarDays, CalendarOff, Download, Check, X, Clock, Users2, Briefcase,
-  RefreshCw, Star, AlertTriangle, Trash2, Wifi, Pencil,
+  RefreshCw, Star, AlertTriangle, Trash2, Wifi, Pencil, Palette,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -68,13 +68,46 @@ const ATTENDANCE_STATUS: Record<string, { label: string; swatch: string; tone: a
   pending_approval: { label: 'Pending approval', swatch: 'bg-[var(--accent)]', tone: 'accent' },
   not_approved: { label: 'Not approved', swatch: 'bg-[var(--negative)]', tone: 'negative' },
   absent: { label: 'Absent', swatch: 'bg-[var(--negative)]', tone: 'negative' },
-  leave: { label: 'Leave', swatch: 'bg-[var(--brand)]', tone: 'brand' },
+  leave: { label: 'Leave', swatch: 'bg-[#22c55e]', tone: 'positive' },
+  // Not a status of its own on the server: a leave day whose leave type is unpaid (loss of pay).
+  unpaid_leave: { label: 'Unpaid leave', swatch: 'bg-[#991b1b]', tone: 'negative' },
   holiday: { label: 'Holiday', swatch: 'bg-[#8b5cf6]', tone: 'info' },
   weekoff: { label: 'Weekly off', swatch: 'bg-[var(--border)]', tone: 'neutral' },
 };
 
 const statusMeta = (s?: string | null) => ATTENDANCE_STATUS[s || '']
   || { label: 'Not marked', swatch: 'bg-transparent border border-line-strong', tone: 'neutral' as const };
+
+/**
+ * HR can give each kind of day its own colour. A status with no colour saved
+ * keeps the built-in one; the hex here is only what the colour picker starts on.
+ */
+const COLOR_KEYS = ['present', 'wfh', 'half_day', 'pending_approval', 'not_approved', 'absent', 'leave', 'unpaid_leave', 'holiday', 'weekoff', 'not_marked'] as const;
+const DEFAULT_HEX: Record<string, string> = {
+  present: '#15803d', wfh: '#2563eb', half_day: '#b45309', pending_approval: '#b45309', not_approved: '#dc2626',
+  absent: '#dc2626', leave: '#22c55e', unpaid_leave: '#991b1b', holiday: '#8b5cf6', weekoff: '#eceef2', not_marked: '#ffffff',
+};
+/** The key a register cell is coloured by: approved leave splits into paid and unpaid. */
+const cellKey = (c: { status?: string | null; paid?: boolean }) =>
+  (c.status === 'leave' && c.paid === false ? 'unpaid_leave' : c.status);
+const labelOf = (k: string) => (k === 'not_marked' ? 'Not marked' : k === 'leave' ? 'Paid leave' : ATTENDANCE_STATUS[k].label);
+
+function useAttendanceColors() {
+  const { data } = useQuery({
+    queryKey: ['attendance', 'colors'],
+    queryFn: () => api.get('/hr/attendance-colors').then((r) => r.data as { colors: Record<string, string>; can_edit: boolean }),
+    staleTime: 5 * 60_000,
+  });
+  return { colors: data?.colors || {}, canEdit: !!data?.can_edit };
+}
+
+/** Class and style for a status swatch: HR's colour when one is set, else the built-in. */
+function swatchFor(key: string | null | undefined, colors: Record<string, string>) {
+  const k = key && ATTENDANCE_STATUS[key] ? key : 'not_marked';
+  const custom = colors[k];
+  if (!custom) return { className: statusMeta(key).swatch, style: undefined };
+  return { className: k === 'not_marked' ? 'border border-line-strong' : '', style: { backgroundColor: custom } };
+}
 
 function AttendanceTab() {
   const qc = useQueryClient();
@@ -422,8 +455,11 @@ function AttendanceTab() {
                   <Select value={filters.status} aria-label="Status" className="h-8 w-[150px] text-[13px]"
                     onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))}>
                     <option value="">Any status</option>
-                    {['present', 'pending_approval', 'not_approved', 'absent', 'half_day', 'leave']
+                    {['present', 'pending_approval', 'not_approved', 'absent', 'half_day']
                       .map((k) => <option key={k} value={k}>{ATTENDANCE_STATUS[k].label}</option>)}
+                    <option value="leave">Any leave</option>
+                    <option value="paid_leave">{labelOf('leave')}</option>
+                    <option value="unpaid_leave">{ATTENDANCE_STATUS.unpaid_leave.label}</option>
                   </Select>
                 </>
               )}
@@ -485,6 +521,7 @@ function RegisterGrid({ reg, onOpenDay }: {
   // A name opens that person's details, for anyone allowed to see them.
   const canOpen = can('employees', 'view');
   const [personId, setPersonId] = useState<string | null>(null);
+  const { colors } = useAttendanceColors();
   return (
     <div className="overflow-x-auto">
       {personId && <MemberDrawer id={personId} onClose={() => setPersonId(null)} />}
@@ -500,8 +537,8 @@ function RegisterGrid({ reg, onOpenDay }: {
                 className={cx('label-cap px-1 py-2 text-center border-b border-line min-w-[26px]',
                   // A weekly off column reads differently from a
                   // working one before anybody looks at a single cell.
-                  d.week_off && 'bg-sunken text-subtle/70',
-                  d.holiday && 'text-[#8b5cf6]')}>
+                  d.week_off && 'bg-sunken text-subtle/70')}
+                style={d.holiday ? { color: colors.holiday || DEFAULT_HEX.holiday } : undefined}>
                 {Number(d.date.slice(-2))}
               </th>
             ))}
@@ -523,7 +560,9 @@ function RegisterGrid({ reg, onOpenDay }: {
                 )}
               </td>
               {row.cells.map((c: any) => {
-                const m = statusMeta(c.status);
+                const base = statusMeta(cellKey(c));
+                const m = c.leave_type ? { ...base, label: `${base.label} (${c.leave_type})` } : base;
+                const sw = swatchFor(cellKey(c), colors);
                 return (
                   <td key={c.date}
                     className={cx('px-1 py-2 border-b border-line text-center', c.week_off && 'bg-sunken')}>
@@ -535,7 +574,8 @@ function RegisterGrid({ reg, onOpenDay }: {
                       className={cx('inline-block h-4 w-4 rounded-sm cursor-pointer align-middle',
                         'hover:ring-2 hover:ring-[var(--brand)] hover:ring-offset-1 hover:ring-offset-[var(--raised)]',
                         'focus-visible:ring-2 focus-visible:ring-[var(--brand)] transition-shadow',
-                        m.swatch, c.extra_day && 'ring-2 ring-[var(--info,#2563eb)] ring-offset-1 ring-offset-[var(--raised)]')}
+                        sw.className, c.extra_day && 'ring-2 ring-[var(--info,#2563eb)] ring-offset-1 ring-offset-[var(--raised)]')}
+                      style={sw.style}
                     />
                   </td>
                 );
@@ -566,19 +606,81 @@ function RegisterGrid({ reg, onOpenDay }: {
 }
 
 function RegisterLegend() {
+  const { colors, canEdit } = useAttendanceColors();
+  const [editing, setEditing] = useState(false);
   return (
-    <div className="flex flex-wrap gap-x-4 gap-y-2 border-t border-line px-4 py-2.5 text-[12px] text-subtle">
-      {['present', 'pending_approval', 'absent', 'leave', 'weekoff', 'holiday', 'half_day', 'wfh']
-        .map((key) => (
-          <span key={key} className="flex items-center gap-1.5">
-            <span className={cx('h-3 w-3 rounded-sm', ATTENDANCE_STATUS[key].swatch)} aria-hidden />
-            {ATTENDANCE_STATUS[key].label}
-          </span>
-        ))}
-      <span className="flex items-center gap-1.5">
-        <span className="h-3 w-3 rounded-sm border border-line-strong" aria-hidden />Not marked
-      </span>
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line px-4 py-2.5 text-[12px] text-subtle">
+      {['present', 'pending_approval', 'not_approved', 'absent', 'leave', 'unpaid_leave', 'weekoff', 'holiday', 'half_day', 'wfh', 'not_marked']
+        .map((key) => {
+          const sw = swatchFor(key, colors);
+          return (
+            <span key={key} className="flex items-center gap-1.5">
+              <span className={cx('h-3 w-3 rounded-sm', sw.className)} style={sw.style} aria-hidden />
+              {labelOf(key)}
+            </span>
+          );
+        })}
+      {canEdit && (
+        <Button size="sm" variant="ghost" className="ml-auto" icon={<Palette size={14} />} onClick={() => setEditing(true)}>
+          Colours
+        </Button>
+      )}
+      {editing && <AttendanceColorsModal saved={colors} onClose={() => setEditing(false)} />}
     </div>
+  );
+}
+
+/** HR picks the colour of each kind of day. Everyone sees the result. */
+function AttendanceColorsModal({ saved, onClose }: { saved: Record<string, string>; onClose: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  // null = use the built-in colour.
+  const [draft, setDraft] = useState<Record<string, string | null>>(
+    () => Object.fromEntries(COLOR_KEYS.map((k) => [k, saved[k] || null])),
+  );
+  const save = useMutation({
+    mutationFn: () => api.put('/hr/attendance-colors', { colors: draft }),
+    onSuccess: () => {
+      toast.success('Register colours saved.');
+      qc.invalidateQueries({ queryKey: ['attendance', 'colors'] });
+      onClose();
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+  const changed = COLOR_KEYS.some((k) => (draft[k] || null) !== (saved[k] || null));
+
+  return (
+    <Modal open onClose={onClose} title="Register colours"
+      subtitle="The colour of each kind of day in the attendance register. Everyone sees these colours."
+      footer={(
+        <>
+          <Button variant="ghost" className="mr-auto" onClick={() => setDraft(Object.fromEntries(COLOR_KEYS.map((k) => [k, null])))}>
+            Reset all
+          </Button>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" loading={save.isPending} disabled={!changed} onClick={() => save.mutate()}>Save</Button>
+        </>
+      )}>
+      <div className="divide-y divide-line">
+        {COLOR_KEYS.map((k) => {
+          const custom = draft[k];
+          const sw = swatchFor(k, custom ? { [k]: custom } : {});
+          return (
+            <div key={k} className="flex items-center gap-3 py-2">
+              <span className={cx('h-5 w-5 shrink-0 rounded', sw.className)} style={sw.style} aria-hidden />
+              <span className="flex-1 text-[13.5px] text-ink">{labelOf(k)}</span>
+              {custom
+                ? <button type="button" className="text-[12px] text-subtle hover:text-ink cursor-pointer" onClick={() => setDraft((d) => ({ ...d, [k]: null }))}>Use default</button>
+                : <span className="text-[12px] text-subtle">Default</span>}
+              <input type="color" aria-label={`Colour for ${labelOf(k)}`}
+                value={custom || DEFAULT_HEX[k]}
+                onChange={(e) => setDraft((d) => ({ ...d, [k]: e.target.value }))}
+                className="h-8 w-10 cursor-pointer rounded border border-line bg-transparent p-0.5" />
+            </div>
+          );
+        })}
+      </div>
+    </Modal>
   );
 }
 

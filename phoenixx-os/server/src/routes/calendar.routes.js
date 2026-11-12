@@ -5,13 +5,14 @@ import { uuid, nowIso } from '../lib/util.js';
 import { ok, created, validate, notFound, badRequest, forbidden, audit } from '../lib/http.js';
 import { notifyMany } from '../services/notifications.js';
 import { DEFAULT_TZ } from '../lib/dueTime.js';
-import { KIND } from '../services/liveMeetings.js';
+import { KIND, visibility } from '../services/liveMeetings.js';
 
 /**
  * The office calendar. One shared calendar per workspace that everyone on the
  * team can add to and edit: outings, trainings, deadlines, celebrations. The
- * same view also shows - read-only - company holidays (HR owns those), who is
- * on approved leave, and the meetings the viewer is on.
+ * same view also shows - read-only - company holidays (HR owns those), who on
+ * the viewer's own team is on approved leave (owners and HR see everyone), and
+ * the meetings the viewer or anyone on their team is on.
  *
  * Anyone may edit any event (it is a shared board, and every change records who
  * made it); deleting is for whoever created it, or an owner, HR or a manager.
@@ -23,10 +24,26 @@ const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 const CATEGORIES = ['event', 'deadline', 'training', 'celebration', 'reminder', 'other'];
 const CAN_DELETE_ANY = ['owner', 'hr', 'manager', 'super_admin'];
 const MAX_RANGE_DAYS = 100;
+const SEES_ALL_LEAVE = ['owner', 'hr', 'super_admin'];
 
 function staffOnly(req) {
   if (req.auth.role === 'client') throw forbidden('The office calendar is for the team');
 }
+/**
+ * The viewer's team, as user ids: themselves, the people who report to them,
+ * their teammates (same manager) and that manager.
+ */
+async function teamOf(tenantId, userId) {
+  const me = await get('SELECT manager_id FROM users WHERE id = ? AND tenant_id = ?', [userId, tenantId]);
+  const boss = me?.manager_id || null;
+  const rows = await all(
+    `SELECT id FROM users WHERE tenant_id = ? AND deleted_at IS NULL
+        AND (id = ? OR manager_id = ?${boss ? ' OR manager_id = ? OR id = ?' : ''})`,
+    [tenantId, userId, userId, ...(boss ? [boss, boss] : [])],
+  );
+  return rows.length ? rows.map((r) => r.id) : [userId];
+}
+
 const tzOf = async (tenantId) => (await get('SELECT timezone FROM tenants WHERE id = ?', [tenantId]))?.timezone || DEFAULT_TZ;
 
 const SELECT = `
@@ -62,24 +79,59 @@ router.get('/', async (req, res) => {
       WHERE tenant_id = ? AND deleted_at IS NULL AND holiday_date BETWEEN ? AND ? ORDER BY holiday_date`,
     [tenantId, from, to],
   );
+  const team = await teamOf(tenantId, userId);
+  const inTeam = (col) => `${col} IN (${team.map(() => '?').join(',')})`;
+
   // Who is away: names and days only - never the reason or the leave type.
+  // Owners and HR see everyone; anyone else sees only their own team.
+  const seesAllLeave = SEES_ALL_LEAVE.includes(req.auth.role);
   const leave = await all(
     `SELECT l.id, l.user_id, u.name, l.from_date, l.to_date FROM leave_requests l JOIN users u ON u.id = l.user_id
       WHERE l.tenant_id = ? AND l.status = 'approved' AND COALESCE(l.kind, 'leave') = 'leave'
-        AND l.from_date <= ? AND l.to_date >= ? AND u.deleted_at IS NULL
-      ORDER BY l.from_date, u.name`, [tenantId, to, from],
+        AND l.from_date <= ? AND l.to_date >= ? AND u.deleted_at IS NULL ${seesAllLeave ? '' : `AND ${inTeam('l.user_id')}`}
+      ORDER BY l.from_date, u.name`, [tenantId, to, from, ...(seesAllLeave ? [] : team)],
   );
-  // The viewer's own meetings (host, organiser or invited). A day either side covers time zones.
+
+  // Meetings the viewer or anyone on their team is on (host, organiser or
+  // invited and not declined). A day either side covers time zones.
+  // `mine` = the viewer is on it; `can_open` = the meeting page will let them in.
   const lo = new Date(Date.parse(`${from}T00:00:00Z`) - 86_400_000).toISOString();
   const hi = new Date(Date.parse(`${to}T00:00:00Z`) + 2 * 86_400_000).toISOString();
-  const meetings = await all(
-    `SELECT m.id, m.title, m.scheduled_at, m.duration_minutes, m.status FROM meetings m
+  const onIt = (who) => `(${who('m.host_id')} OR ${who('m.organizer_id')} OR EXISTS (
+          SELECT 1 FROM meeting_attendees a WHERE a.meeting_id = m.id AND a.deleted_at IS NULL AND ${who('a.user_id')} AND a.response <> 'declined'))`;
+  const vis = visibility(req.auth);
+  const rows = await all(
+    `SELECT m.id, m.title, m.scheduled_at, m.duration_minutes, m.status,
+            CASE WHEN ${onIt((c) => `${c} = ?`)} THEN 1 ELSE 0 END AS mine,
+            CASE WHEN ${vis.where} THEN 1 ELSE 0 END AS can_open
+       FROM meetings m
       WHERE m.tenant_id = ? AND m.kind = ? AND m.deleted_at IS NULL AND m.cancelled_at IS NULL
-        AND m.scheduled_at >= ? AND m.scheduled_at < ?
-        AND (m.host_id = ? OR m.organizer_id = ? OR EXISTS (
-          SELECT 1 FROM meeting_attendees a WHERE a.meeting_id = m.id AND a.deleted_at IS NULL AND a.user_id = ? AND a.response <> 'declined'))
-      ORDER BY m.scheduled_at`, [tenantId, KIND, lo, hi, userId, userId, userId],
+        AND m.scheduled_at >= ? AND m.scheduled_at < ? AND ${onIt(inTeam)}
+      ORDER BY m.scheduled_at`,
+    [userId, userId, userId, ...vis.params, tenantId, KIND, lo, hi, ...team, ...team, ...team],
   );
+  // Which teammates are on each meeting, so a team meeting says whose it is.
+  const names = new Map();
+  if (rows.length) {
+    const ids = rows.map((m) => m.id);
+    const ph = ids.map(() => '?').join(',');
+    const people = await all(
+      `SELECT m.id AS meeting_id, u.id AS user_id, u.name FROM meetings m JOIN users u ON u.id = m.host_id OR u.id = m.organizer_id
+        WHERE m.id IN (${ph})
+       UNION
+       SELECT a.meeting_id, u.id AS user_id, u.name FROM meeting_attendees a JOIN users u ON u.id = a.user_id
+        WHERE a.meeting_id IN (${ph}) AND a.deleted_at IS NULL AND a.response <> 'declined'`, [...ids, ...ids],
+    );
+    for (const p of people) {
+      if (p.user_id === userId || !team.includes(p.user_id)) continue;
+      if (!names.has(p.meeting_id)) names.set(p.meeting_id, new Set());
+      names.get(p.meeting_id).add(p.name);
+    }
+  }
+  const meetings = rows.map((m) => ({
+    ...m, mine: !!Number(m.mine), can_open: !!Number(m.can_open),
+    team_members: [...(names.get(m.id) || [])].sort(),
+  }));
 
   return ok(res, { timezone: tz, events: events.map(shape(req)), holidays, leave, meetings });
 });
