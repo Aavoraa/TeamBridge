@@ -22,11 +22,14 @@ async function join(name, email, role = 'employee') {
   return { user: invite.body.data, auth: { token: ok.body.data.access_token } };
 }
 
-let priya; let rahul; let tenantId;
+let priya; let rahul; let lead; let tenantId;
 before(async () => {
   priya = await join('Priya Raman', 'priya@cal.test');
   rahul = await join('Rahul Kumar', 'rahul@cal.test');
   tenantId = (await db.get('SELECT tenant_id FROM users WHERE id = ?', [priya.user.id])).tenant_id;
+  // Priya and Rahul are one team, under Divya.
+  lead = await join('Divya Lead', 'divya@cal.test', 'manager');
+  await db.run('UPDATE users SET manager_id = ? WHERE id IN (?, ?)', [lead.user.id, priya.user.id, rahul.user.id]);
 });
 
 const range = '/calendar?from=2030-03-01&to=2030-03-31';
@@ -47,7 +50,7 @@ test('anyone on the team adds an event; everyone sees it; the team can be told',
   assert.equal(seen.body.data.events[0].can_delete, false, 'only the creator or a lead deletes');
 
   const notes = await db.all("SELECT user_id, title FROM notifications WHERE event_key = 'calendar.event_added'");
-  assert.deepEqual(notes.map((n) => n.user_id).sort(), [owner.user.id, rahul.user.id].sort(), 'everyone but the person who added it');
+  assert.deepEqual(notes.map((n) => n.user_id).sort(), [owner.user.id, rahul.user.id, lead.user.id].sort(), 'everyone but the person who added it');
   assert.match(notes[0].title, /On the office calendar: Team lunch/);
 });
 
@@ -98,7 +101,50 @@ test('holidays, who is on leave, and your own meetings show alongside', async ()
   assert.deepEqual(p.holidays.map((h) => h.name), ['Good Friday']);
   assert.deepEqual(p.leave.map((l) => [l.name, l.from_date, l.to_date]), [['Rahul Kumar', '2030-03-18', '2030-03-19']]);
   assert.equal(p.leave[0].reason, undefined, 'the reason for leave is private');
-  assert.deepEqual(p.meetings.map((m) => m.title), ['Sprint review']);
+  assert.deepEqual(p.meetings.map((m) => [m.title, m.mine, m.can_open]), [['Sprint review', true, true]]);
   const r = (await api.get(range, rahul.auth)).body.data;
-  assert.equal(r.meetings.length, 0, 'meetings are only the ones you are on');
+  assert.deepEqual(r.meetings.map((m) => [m.title, m.mine, m.can_open, m.team_members]),
+    [['Sprint review', false, false, ['Priya Raman']]], 'a teammate sees it, says whose it is, but cannot open it');
+});
+
+test('meetings show to the team, and to no one else', async () => {
+  const otherLead = await join('Meena Lead', 'meena@cal.test', 'manager');
+  const outsider = await join('Vikram Other', 'vikram@cal.test');
+  await db.run('UPDATE users SET manager_id = ? WHERE id = ?', [otherLead.user.id, outsider.user.id]);
+  const titles = async (who) => (await api.get(range, who.auth)).body.data.meetings.map((m) => m.title);
+
+  assert.deepEqual(await titles(outsider), [], 'someone on another team sees none of it');
+  assert.deepEqual(await titles(otherLead), [], 'nor does another team\'s manager');
+  const forLead = (await api.get(range, lead.auth)).body.data.meetings;
+  assert.deepEqual(forLead.map((m) => [m.title, m.mine, m.can_open]), [['Sprint review', false, true]],
+    'the manager sees their report\'s meeting and can open it');
+
+  const own = await api.post('/ai-meetings', {
+    title: 'Vendor call', date: '2030-03-21', time: '15:00', duration_minutes: 30, participant_ids: [],
+  }, outsider.auth);
+  assert.equal(own.status, 201, JSON.stringify(own.body));
+  assert.deepEqual(await titles(outsider), ['Vendor call']);
+  assert.deepEqual(await titles(otherLead), ['Vendor call']);
+  assert.deepEqual(await titles(priya), ['Sprint review'], 'another team\'s meeting stays off this team\'s calendar');
+});
+
+test('leave on the calendar is seen only by the person\'s team, their manager and HR', async () => {
+  const otherLead = await join('Karthik Lead', 'karthik@cal.test', 'manager');
+  const outsider = await join('Oscar Other', 'oscar@cal.test');
+  const hr = await join('Sanjay HR', 'sanjay@cal.test', 'hr');
+  await db.run('UPDATE users SET manager_id = ? WHERE id = ?', [otherLead.user.id, outsider.user.id]);
+
+  const ts = new Date().toISOString();
+  const lt = await db.get('SELECT id FROM leave_types WHERE tenant_id = ? LIMIT 1', [tenantId]);
+  await db.run(`INSERT INTO leave_requests (id, tenant_id, user_id, leave_type_id, from_date, to_date, days, reason, status, created_at, updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)`, [crypto.randomUUID(), tenantId, lead.user.id, lt.id, '2030-03-25', '2030-03-25', 1, 'Personal', 'approved', ts, ts]);
+  const away = async (who) => (await api.get(range, who.auth)).body.data.leave.map((l) => l.name).sort();
+
+  assert.deepEqual(await away(priya), ['Divya Lead', 'Rahul Kumar'], 'a teammate and their own manager');
+  assert.deepEqual(await away(rahul), ['Divya Lead', 'Rahul Kumar'], 'their own leave too');
+  assert.deepEqual(await away(lead), ['Divya Lead', 'Rahul Kumar'], 'the manager sees their reports');
+  assert.deepEqual(await away(otherLead), [], 'another team\'s manager sees none of it');
+  assert.deepEqual(await away(outsider), [], 'someone on another team sees none of it');
+  assert.deepEqual(await away(hr), ['Divya Lead', 'Rahul Kumar'], 'HR sees everyone');
+  assert.deepEqual(await away({ auth: ownerAuth }), ['Divya Lead', 'Rahul Kumar'], 'the owner sees everyone');
 });

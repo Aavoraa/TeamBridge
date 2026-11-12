@@ -112,10 +112,13 @@ export default function OfficeCalendar() {
     }
     if (show.meeting) {
       for (const m of data.meetings) {
+        // Your own meetings in colour; a teammate's in grey, saying whose it is.
+        const team: string[] = m.team_members || [];
         put(dayInTz(m.scheduled_at, tz), {
-          key: `m${m.id}`, kind: 'meeting', title: m.title, tone: 'info', meetingId: m.id,
+          key: `m${m.id}`, kind: 'meeting', title: m.title, tone: m.mine === false ? 'neutral' : 'info',
+          meetingId: m.can_open === false ? undefined : m.id,
           time: timeInTz(m.scheduled_at, tz), sort: `3${new Date(m.scheduled_at).toLocaleTimeString('en-GB', { timeZone: tz })}`,
-          sub: `${m.duration_minutes} min meeting`,
+          sub: [`${m.duration_minutes} min meeting`, m.mine === false && team.length ? `Team: ${team.join(', ')}` : ''].filter(Boolean).join(' · '),
         });
       }
     }
@@ -139,7 +142,7 @@ export default function OfficeCalendar() {
     <>
       <PageHeader
         title="Office calendar"
-        subtitle="One calendar for the whole team. Anyone can add or edit events; holidays, leave and your meetings show alongside."
+        subtitle="One calendar for the whole team. Anyone can add or edit events; holidays, your team's leave and meetings show alongside."
         actions={<Button variant="primary" icon={<Plus size={15} />} onClick={() => setEditing({ start_date: selected || (month === today.slice(0, 7) ? today : `${month}-01`) })}>Add event</Button>}
       />
 
@@ -154,7 +157,7 @@ export default function OfficeCalendar() {
             <h2 className="text-[17px] font-semibold text-ink min-w-[150px]">{monthLabel}</h2>
             <Button size="sm" onClick={() => { setMonth(today.slice(0, 7)); setSelected(today); }}>Today</Button>
             <div className="ml-auto flex flex-wrap gap-x-4 gap-y-1">
-              {([['event', 'Office events'], ['holiday', 'Holidays'], ['leave', 'On leave'], ['meeting', 'My meetings']] as const).map(([k, label]) => (
+              {([['event', 'Office events'], ['holiday', 'Holidays'], ['leave', 'On leave'], ['meeting', 'Team meetings']] as const).map(([k, label]) => (
                 <Checkbox key={k} label={<span className="text-[13px]">{label}</span>} checked={show[k]} onChange={(v) => setShow((s) => ({ ...s, [k]: v }))} />
               ))}
             </div>
@@ -263,7 +266,7 @@ function DayPanel({ day, items, onAdd, onOpen }: {
             </div>
           );
           if (it.kind === 'event') return <button key={it.key} type="button" onClick={() => onOpen(it)} className="block w-full rounded-lg p-2 text-left hover:bg-sunken">{body}</button>;
-          if (it.kind === 'meeting') return <Link key={it.key} to={`/ai-meetings/m/${it.meetingId}`} className="block rounded-lg p-2 hover:bg-sunken">{body}</Link>;
+          if (it.kind === 'meeting' && it.meetingId) return <Link key={it.key} to={`/ai-meetings/m/${it.meetingId}`} className="block rounded-lg p-2 hover:bg-sunken">{body}</Link>;
           return <div key={it.key} className="p-2">{body}</div>;
         })}
       </div>

@@ -720,6 +720,43 @@ router.patch('/work-schedules', requires('hr_attendance', 'approve'), async (req
   return ok(res, await workspaceSchedule(tenantId));
 });
 
+// ===================================================== REGISTER COLOURS
+/**
+ * The colour of each kind of day in the attendance register. Everyone sees
+ * the same colours; only HR (and the owner) can change them. A status with no
+ * colour saved uses the built-in one.
+ */
+const COLOR_KEYS = ['present', 'wfh', 'half_day', 'pending_approval', 'not_approved', 'absent', 'leave', 'unpaid_leave', 'holiday', 'weekoff', 'not_marked'];
+const COLOR_EDITORS = ['hr', 'owner', 'super_admin'];
+const HEX = /^#[0-9a-f]{6}$/i;
+
+async function attendanceColors(tenantId) {
+  const raw = (await get('SELECT attendance_colors FROM tenants WHERE id = ?', [tenantId]))?.attendance_colors;
+  let saved = {};
+  try { saved = raw ? JSON.parse(raw) : {}; } catch { saved = {}; }
+  return Object.fromEntries(COLOR_KEYS.filter((k) => HEX.test(saved?.[k] || '')).map((k) => [k, saved[k].toLowerCase()]));
+}
+
+router.get('/attendance-colors', requires('hr_attendance', 'view'), async (req, res) => ok(res, {
+  colors: await attendanceColors(req.auth.tenantId),
+  can_edit: COLOR_EDITORS.includes(req.auth.role),
+}));
+
+router.put('/attendance-colors', async (req, res) => {
+  if (!COLOR_EDITORS.includes(req.auth.role)) throw forbidden('Only HR can change the register colours');
+  const body = validate(z.object({
+    colors: z.partialRecord(z.enum(COLOR_KEYS), z.string().regex(HEX, 'Pick a colour like #16a34a').nullable()),
+  }), req.body);
+  const { tenantId } = req.auth;
+  const before = await attendanceColors(tenantId);
+  const next = { ...before };
+  for (const [k, v] of Object.entries(body.colors)) { if (v) next[k] = v.toLowerCase(); else delete next[k]; }
+  await run('UPDATE tenants SET attendance_colors = ?, updated_at = ? WHERE id = ?',
+    [Object.keys(next).length ? JSON.stringify(next) : null, nowIso(), tenantId]);
+  await audit(req, { entity: 'tenant', entityId: tenantId, action: 'update', before: { attendance_colors: before }, after: { attendance_colors: next } });
+  return ok(res, { colors: next, can_edit: true });
+});
+
 // ======================================================== OFFICE NETWORKS
 /**
  * The office connections a check-in is approved from, and the switch that
@@ -1035,7 +1072,7 @@ router.get('/attendance/register', requires('hr_attendance', 'view'), async (req
     [tenantId, from, to],
   );
   const leaves = await all(
-    `SELECT l.*, lt.name AS leave_type_name FROM leave_requests l
+    `SELECT l.*, lt.name AS leave_type_name, COALESCE(lt.paid, 1) AS leave_paid FROM leave_requests l
        LEFT JOIN leave_types lt ON lt.id = l.leave_type_id
       WHERE l.tenant_id = ? AND l.status = 'approved' AND l.from_date <= ? AND l.to_date >= ?`,
     [tenantId, to, from],
@@ -1090,7 +1127,9 @@ router.get('/attendance/register', requires('hr_attendance', 'view'), async (req
         };
       }
       const leave = myLeaves.find((l) => l.from_date <= day.date && l.to_date >= day.date);
-      if (leave) return { ...base, status: 'leave', leave_type: leave.leave_type_name };
+      // Paid leave and loss-of-pay leave are both "leave"; `paid` says which,
+      // so the register can show them apart.
+      if (leave) return { ...base, status: 'leave', leave_type: leave.leave_type_name, paid: !!Number(leave.leave_paid) };
       return { ...base, status: day.future ? null : 'absent' };
     });
 
@@ -1101,6 +1140,7 @@ router.get('/attendance/register', requires('hr_attendance', 'view'), async (req
     const halfDay = onWorkingDays('half_day');
     const extraDays = cells.filter((c) => c.extra_day && ['present', 'wfh', 'half_day'].includes(c.status)).length;
     const leave = count('leave');
+    const unpaidLeave = cells.filter((c) => c.status === 'leave' && c.paid === false).length;
 
     return {
       user: u,
@@ -1109,6 +1149,8 @@ router.get('/attendance/register', requires('hr_attendance', 'view'), async (req
         present,
         half_day: halfDay,
         leave,
+        paid_leave: leave - unpaidLeave,
+        unpaid_leave: unpaidLeave,
         absent: count('absent', 'not_approved'),
         pending: count(PENDING),
         week_off: count('weekoff'),
@@ -1127,11 +1169,12 @@ router.get('/attendance/register', requires('hr_attendance', 'view'), async (req
         ),
       },
     };
-  }).filter((row) => !statusFilter || row.cells.some((c) => statusFilter.includes(c.status || 'not_marked')));
+  }).filter((row) => !statusFilter || row.cells.some((c) => statusFilter.includes(c.status || 'not_marked')
+    || (c.status === 'leave' && statusFilter.includes(c.paid === false ? 'unpaid_leave' : 'paid_leave'))));
 
   // The month at a glance, across whoever survived the filters.
   const totals = rows.reduce((a, r) => {
-    for (const k of ['present', 'half_day', 'leave', 'absent', 'pending', 'week_off', 'holiday', 'not_marked', 'extra_days']) {
+    for (const k of ['present', 'half_day', 'leave', 'paid_leave', 'unpaid_leave', 'absent', 'pending', 'week_off', 'holiday', 'not_marked', 'extra_days']) {
       a[k] = (a[k] || 0) + r.summary[k];
     }
     return a;
