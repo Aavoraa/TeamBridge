@@ -1072,7 +1072,7 @@ router.get('/attendance/register', requires('hr_attendance', 'view'), async (req
     [tenantId, from, to],
   );
   const leaves = await all(
-    `SELECT l.*, lt.name AS leave_type_name, COALESCE(lt.paid, 1) AS leave_paid FROM leave_requests l
+    `SELECT l.*, lt.name AS leave_type_name, lt.code AS leave_type_code, COALESCE(lt.paid, 1) AS leave_paid FROM leave_requests l
        LEFT JOIN leave_types lt ON lt.id = l.leave_type_id
       WHERE l.tenant_id = ? AND l.status = 'approved' AND l.from_date <= ? AND l.to_date >= ?`,
     [tenantId, to, from],
@@ -1100,6 +1100,8 @@ router.get('/attendance/register', requires('hr_attendance', 'view'), async (req
   const rows = users.map((u) => {
     const mine = records.filter((r) => r.user_id === u.id);
     const myLeaves = leaves.filter((l) => l.user_id === u.id);
+    // Casual leave days counted per month: past the month's allowance they are loss of pay.
+    const casualByMonth = {};
 
     const cells = days.map((day) => {
       const base = { date: day.date, week_off: day.week_off, future: day.future };
@@ -1129,7 +1131,16 @@ router.get('/attendance/register', requires('hr_attendance', 'view'), async (req
       const leave = myLeaves.find((l) => l.from_date <= day.date && l.to_date >= day.date);
       // Paid leave and loss-of-pay leave are both "leave"; `paid` says which,
       // so the register can show them apart.
-      if (leave) return { ...base, status: 'leave', leave_type: leave.leave_type_name, paid: !!Number(leave.leave_paid) };
+      if (leave) {
+        let paid = !!Number(leave.leave_paid);
+        if (leave.leave_type_code === 'CL' && leave.kind !== 'permission') {
+          const m = day.date.slice(0, 7);
+          casualByMonth[m] = (casualByMonth[m] || 0) + 1;
+          if (casualByMonth[m] > CL_PER_MONTH) paid = false;
+        }
+        return { ...base, status: 'leave', leave_type: paid || leave.leave_type_code !== 'CL' ? leave.leave_type_name
+          : `${leave.leave_type_name} – beyond the month's allowance, loss of pay`, paid };
+      }
       return { ...base, status: day.future ? null : 'absent' };
     });
 
@@ -1309,32 +1320,75 @@ router.post('/attendance/regularizations/:id/decide', requires('hr_attendance', 
 });
 
 // ================================================================= C2 LEAVE
-router.get('/leave/types', requires('hr_leave', 'view'), async (req, res) => ok(res, await all(
+// Sick and earned leave are not offered (see HIDDEN_LEAVE_CODES below).
+router.get('/leave/types', requires('hr_leave', 'view'), async (req, res) => ok(res, (await all(
   'SELECT * FROM leave_types WHERE tenant_id = ? AND active = 1 ORDER BY name', [req.auth.tenantId],
-)));
+)).filter((t) => !['SL', 'EL'].includes(t.code))));
+
+/**
+ * Leave policy.
+ * - Casual leave: one day a month, and it does not carry over.
+ * - Loss of pay: every day of leave taken in a month once that month's casual
+ *   leave is used up, plus any leave taken as Loss of Pay outright.
+ * - Hourly permission: two hours a month.
+ * Sick leave and earned leave are not offered. Any other leave type HR adds
+ * keeps its yearly quota.
+ */
+export const CL_PER_MONTH = 1;
+const PERM_HOURS_PER_MONTH = 2;
+export const HIDDEN_LEAVE_CODES = ['SL', 'EL'];
+const minutesOf = (t) => { const [h, m] = String(t).split(':').map(Number); return h * 60 + m; };
 
 router.get('/leave/balances', requires('hr_leave', 'view'), async (req, res) => {
   const { tenantId } = req.auth;
+  const thisMonth = todayIso().slice(0, 7);
   const year = Number(req.query.year) || new Date().getUTCFullYear();
+  const month = /^\d{4}-\d{2}$/.test(String(req.query.month || '')) ? String(req.query.month)
+    : (String(year) === thisMonth.slice(0, 4) ? thisMonth : `${year}-12`);
+  const monthFrom = `${month}-01`;
+  const monthTo = `${month}-31`;
   const userId = req.query.user_id && await can(req.auth, 'hr_leave', 'approve') ? req.query.user_id : req.auth.userId;
 
-  const types = await all('SELECT * FROM leave_types WHERE tenant_id = ? AND active = 1', [tenantId]);
+  const types = (await all('SELECT * FROM leave_types WHERE tenant_id = ? AND active = 1', [tenantId]))
+    .filter((t) => !HIDDEN_LEAVE_CODES.includes(t.code));
+  const usedDays = async (typeId, fromDate, toDate) => Number((await get(
+    `SELECT COALESCE(SUM(days),0) AS d FROM leave_requests WHERE tenant_id = ? AND user_id = ?
+       AND leave_type_id = ? AND status = 'approved' AND kind != 'permission' AND from_date >= ? AND from_date <= ?`,
+    [tenantId, userId, typeId, fromDate, toDate],
+  ))?.d || 0);
+  const cl = types.find((t) => t.code === 'CL');
+  const clThisMonth = cl ? await usedDays(cl.id, monthFrom, monthTo) : 0;
+
+  const base = (t) => ({ leave_type_id: t.id, name: t.name, code: t.code, color: t.color, unit: 'days', carried: 0 });
   return ok(res, await Promise.all(types.map(async (t) => {
+    if (t.code === 'CL') {
+      const used = Math.min(clThisMonth, CL_PER_MONTH);
+      return { ...base(t), period: 'month', entitled: CL_PER_MONTH, used: round1(used), available: round1(CL_PER_MONTH - used) };
+    }
+    if (t.code === 'LOP') {
+      const days = Math.max(0, clThisMonth - CL_PER_MONTH) + await usedDays(t.id, monthFrom, monthTo);
+      return { ...base(t), period: 'month', entitled: 0, used: round1(days), available: 0, counts_up: true };
+    }
+    if (t.code === 'PERM') {
+      const perms = await all(
+        `SELECT from_time, to_time FROM leave_requests WHERE tenant_id = ? AND user_id = ? AND leave_type_id = ?
+           AND status = 'approved' AND from_date >= ? AND from_date <= ?`,
+        [tenantId, userId, t.id, monthFrom, monthTo],
+      );
+      const hours = perms.reduce((s, p) => s + (p.from_time && p.to_time
+        ? Math.max(0, minutesOf(p.to_time) - minutesOf(p.from_time)) / 60 : 0), 0);
+      return { ...base(t), unit: 'hours', period: 'month', entitled: PERM_HOURS_PER_MONTH,
+        used: round1(hours), available: round1(PERM_HOURS_PER_MONTH - hours) };
+    }
+
     const bal = await get(
       'SELECT * FROM leave_balances WHERE tenant_id = ? AND user_id = ? AND leave_type_id = ? AND year = ?',
       [tenantId, userId, t.id, year],
     );
-    const used = Number((await get(
-      `SELECT COALESCE(SUM(days),0) AS d FROM leave_requests WHERE tenant_id = ? AND user_id = ?
-         AND leave_type_id = ? AND status = 'approved' AND from_date LIKE ?`,
-      [tenantId, userId, t.id, `${year}%`],
-    ))?.d || 0);
+    const used = await usedDays(t.id, `${year}-01-01`, `${year}-12-31`);
     const entitled = bal?.entitled ?? t.annual_quota;
-    return {
-      leave_type_id: t.id, name: t.name, code: t.code, color: t.color,
-      entitled, used, carried: bal?.carried || 0,
-      available: round1(entitled + (bal?.carried || 0) - used),
-    };
+    return { ...base(t), period: 'year', entitled, used, carried: bal?.carried || 0,
+      available: round1(entitled + (bal?.carried || 0) - used) };
   })));
 });
 

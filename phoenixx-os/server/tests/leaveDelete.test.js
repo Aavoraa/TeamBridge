@@ -104,8 +104,8 @@ describe('deleting leave requests', () => {
 
   test('a deleted approved request gives its days back', async () => {
     const lr = await apply(employee);
-    // Balances count this year's leave, so the request sits on the last day of it.
-    const lastDay = `${new Date().getFullYear()}-12-31`;
+    // Casual leave is counted by the month, so the request sits on today.
+    const lastDay = new Date().toISOString().slice(0, 10);
     await db.run("UPDATE leave_requests SET status = 'approved', from_date = ?, to_date = ? WHERE id = ?", [lastDay, lastDay, lr.id]);
     const balance = async () => (await api.get('/hr/leave/balances', employee.auth)).body.data
       .find((b) => b.leave_type_id === typeId).used;
