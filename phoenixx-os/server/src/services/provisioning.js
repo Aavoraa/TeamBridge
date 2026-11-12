@@ -80,11 +80,11 @@ export const EXPENSE_CATEGORY_PACK = [
 ];
 
 export const LEAVE_TYPE_PACK = [
-  { code: 'CL', name: 'Casual Leave', annual_quota: 12, color: '#3B82F6' },
+  { code: 'CL', name: 'Casual Leave', annual_quota: 1, color: '#3B82F6' },
   { code: 'SL', name: 'Sick Leave', annual_quota: 8, color: '#EF4444' },
   { code: 'EL', name: 'Earned Leave', annual_quota: 15, color: '#10B981' },
   { code: 'LOP', name: 'Loss of Pay', annual_quota: 0, paid: 0, color: '#64748B' },
-  { code: 'PERM', name: 'Hourly Permission', annual_quota: 24, color: '#F59E0B' },
+  { code: 'PERM', name: 'Hourly Permission', annual_quota: 2, color: '#F59E0B' },
 ];
 
 /** D1/D5 - SOP packs per service line and per workflow. */

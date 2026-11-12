@@ -185,10 +185,12 @@ export default function MobileHR() {
               {(leave.data?.balances || []).map((b: any) => (
                 <Row key={b.leave_type_id}
                   title={b.name}
-                  meta={`${Number(b.used || 0)} used of ${Number(b.entitled || 0)}${
-                    b.carried ? ` · ${b.carried} carried` : ''}`}
-                  right={`${Number(b.available || 0)} left`}
-                  tone={Number(b.available || 0) > 0 ? 'positive' : 'neutral'} />
+                  meta={b.counts_up ? 'Days this month beyond casual leave'
+                    : `${Number(b.used || 0)} used of ${Number(b.entitled || 0)}${b.unit === 'hours' ? ' hrs' : ''}${
+                      b.period === 'month' ? ' this month' : ''}${b.carried ? ` · ${b.carried} carried` : ''}`}
+                  right={b.counts_up ? `${Number(b.used || 0)} days`
+                    : `${Number(b.available || 0)}${b.unit === 'hours' ? ' hrs' : ''} left`}
+                  tone={b.counts_up ? 'neutral' : Number(b.available || 0) > 0 ? 'positive' : 'neutral'} />
               ))}
             </List>
           )}

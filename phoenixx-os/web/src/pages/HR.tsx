@@ -1507,6 +1507,13 @@ function RegularizeModal({ onClose }: { onClose: () => void }) {
 }
 
 /* ================================================================= LEAVE */
+/** "of 1 this month · 0 used", worded for how each leave type builds up. */
+function balanceNote(b: any) {
+  const unit = b.unit === 'hours' ? ' hrs' : '';
+  if (b.counts_up) return `${b.used === 1 ? 'day' : 'days'} this month beyond casual leave`;
+  return `of ${b.entitled}${unit} ${b.period === 'month' ? 'this month' : 'this year'} · ${b.used}${unit} used`;
+}
+
 function LeaveTab() {
   const qc = useQueryClient();
   const toast = useToast();
@@ -1563,16 +1570,21 @@ function LeaveTab() {
             {toDelete.status === 'approved' && ' Any balance it used is given back, and a late check-in it excused goes back to HR for review.'}
           </>
         )} />
-      <div className="grid gap-3 grid-cols-2 lg:grid-cols-5 mb-5">
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-3 mb-5">
         {balances.data?.map((b: any) => (
           <Card key={b.leave_type_id} className="p-3.5">
             <div className="flex items-center gap-2">
               <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: b.color }} aria-hidden />
               <span className="label-cap truncate">{b.name}</span>
             </div>
-            <p className="mt-1.5 text-[20px] font-semibold text-ink tabular">{b.available}</p>
-            <p className="text-[12px] text-subtle">of {b.entitled} · {b.used} used</p>
-            <Meter value={b.used} max={b.entitled || 1} tone={b.used / (b.entitled || 1) > 0.8 ? 'warning' : 'brand'} className="mt-2" />
+            <p className={`mt-1.5 text-[20px] font-semibold tabular ${b.counts_up && b.used > 0 ? 'text-negative' : 'text-ink'}`}>
+              {b.counts_up ? b.used : b.available}
+              {b.unit === 'hours' && <span className="ml-1 text-[13px] font-medium text-subtle">hrs</span>}
+            </p>
+            <p className="text-[12px] text-subtle">{balanceNote(b)}</p>
+            {!b.counts_up && (
+              <Meter value={b.used} max={b.entitled || 1} tone={b.used / (b.entitled || 1) > 0.8 ? 'warning' : 'brand'} className="mt-2" />
+            )}
           </Card>
         ))}
       </div>
