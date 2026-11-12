@@ -104,7 +104,7 @@ async function pgBackend(url) {
     connectionTimeoutMillis: 15_000,
     ssl: local || sslmode === 'disable' ? false : { rejectUnauthorized: false },
   });
-  pool.on('error', (err) => console.error('[pg pool]', err.message));
+  pool.on('error', (err) => { console.error('[pg pool]', err.message); restartIfPasswordRotated(err); });
   // Optional: confine this process to one schema of a shared database (the
   // test suite runs each file in its own). Queued ahead of any other query.
   const schema = process.env.PG_SCHEMA;
@@ -115,17 +115,18 @@ async function pgBackend(url) {
     });
   }
 
+  const run = (p) => p.catch((err) => { restartIfPasswordRotated(err); throw err; });
   return {
     kind: 'pg',
     async query(text, params) {
-      const r = await pool.query(text, params);
+      const r = await run(pool.query(text, params));
       return { rows: r.rows, rowCount: r.rowCount ?? 0 };
     },
     async exec(text) {
-      await pool.query(text);
+      await run(pool.query(text));
     },
     async connect() {
-      const client = await pool.connect();
+      const client = await run(pool.connect());
       return {
         async query(text, params) {
           const r = await client.query(text, params);
@@ -137,6 +138,25 @@ async function pgBackend(url) {
     },
     end: () => pool.end(),
   };
+}
+
+/**
+ * The production database password is generated and rotated by AWS (RDS
+ * managed master password, Secrets Manager). The server reads it only when the
+ * app starts, so after a rotation every query fails with "password
+ * authentication failed" and nobody can sign in. When that happens in
+ * production the process exits; systemd starts it again a few seconds later,
+ * and the start reads the current password. Elsewhere the error is just thrown.
+ */
+let restarting = false;
+export function restartIfPasswordRotated(err, { exit = (code) => process.exit(code), env = process.env } = {}) {
+  if (err?.code !== '28P01' || env.NODE_ENV !== 'production' || env.DB_AUTH_FAILURE_EXIT === 'false') return false;
+  if (restarting) return true;
+  restarting = true;
+  console.error('[db] the database refused the password - it has probably been rotated. Restarting to read the new one.');
+  // A moment for the error responses already on their way out to finish.
+  setTimeout(() => exit(1), 500).unref?.();
+  return true;
 }
 
 async function pgliteBackend(location) {
